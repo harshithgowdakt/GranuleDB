@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/compression"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/compression"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // PartWriter creates a new part on disk from a Block.

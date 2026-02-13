@@ -1,9 +1,9 @@
 package processor
 
 import (
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/engine"
-	"github.com/harshithgowda/goose-db/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/engine"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
 )
 
 // FilterProcessor evaluates a WHERE predicate on each row.

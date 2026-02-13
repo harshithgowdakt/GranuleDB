@@ -1,7 +1,7 @@
 package column
 
 import (
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // Column is an in-memory columnar array of a single type.

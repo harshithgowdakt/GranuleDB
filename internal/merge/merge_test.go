@@ -4,11 +4,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/compression"
-	"github.com/harshithgowda/goose-db/internal/merge"
-	"github.com/harshithgowda/goose-db/internal/storage"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/compression"
+	"github.com/harshithgowdakt/granuledb/internal/merge"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 func TestMergeExecution(t *testing.T) {

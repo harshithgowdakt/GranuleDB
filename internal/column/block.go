@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // Block is a chunk of columnar data with named columns, all the same length.

@@ -1,4 +1,4 @@
-module github.com/harshithgowda/goose-db
+module github.com/harshithgowdakt/granuledb
 
 go 1.24.5
 

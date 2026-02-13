@@ -1,6 +1,6 @@
 package processor
 
-import "github.com/harshithgowda/goose-db/internal/column"
+import "github.com/harshithgowdakt/granuledb/internal/column"
 
 // OutputProcessor is the terminal sink of a pipeline.
 // It collects all incoming chunks into a result slice.

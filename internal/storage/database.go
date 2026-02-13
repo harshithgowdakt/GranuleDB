@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // Database manages all tables and the base data directory.

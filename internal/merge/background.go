@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/harshithgowda/goose-db/internal/compression"
-	"github.com/harshithgowda/goose-db/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/compression"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
 
 // BackgroundMerger runs in a goroutine, periodically checking for merge opportunities.

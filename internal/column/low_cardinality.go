@@ -1,7 +1,7 @@
 package column
 
 import (
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // LowCardinalityColumn implements dictionary encoding for low-cardinality data.

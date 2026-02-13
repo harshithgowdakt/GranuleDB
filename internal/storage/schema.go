@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/harshithgowda/goose-db/internal/types"
+import "github.com/harshithgowdakt/granuledb/internal/types"
 
 // ColumnDef defines a column in a table schema.
 type ColumnDef struct {

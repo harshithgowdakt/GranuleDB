@@ -9,11 +9,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/harshithgowda/goose-db/internal/engine"
-	"github.com/harshithgowda/goose-db/internal/parser"
-	"github.com/harshithgowda/goose-db/internal/processor"
-	"github.com/harshithgowda/goose-db/internal/server"
-	"github.com/harshithgowda/goose-db/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/engine"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/processor"
+	"github.com/harshithgowdakt/granuledb/internal/server"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
 
 func init() {

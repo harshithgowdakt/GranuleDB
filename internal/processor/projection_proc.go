@@ -1,10 +1,10 @@
 package processor
 
 import (
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/engine"
-	"github.com/harshithgowda/goose-db/internal/parser"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/engine"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // ProjectionProcessor evaluates SELECT expressions.

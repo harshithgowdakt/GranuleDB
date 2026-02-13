@@ -5,11 +5,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/parser"
-	"github.com/harshithgowda/goose-db/internal/processor"
-	"github.com/harshithgowda/goose-db/internal/storage"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/processor"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // benchSetup creates a database with a table and inserts rows across numParts parts.

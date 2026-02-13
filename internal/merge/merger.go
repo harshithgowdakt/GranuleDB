@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/harshithgowda/goose-db/internal/aggstate"
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/compression"
-	"github.com/harshithgowda/goose-db/internal/storage"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/aggstate"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/compression"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // MergeExecutor performs the actual merge of multiple source parts into one.

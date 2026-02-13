@@ -1,6 +1,6 @@
 package engine
 
-import "github.com/harshithgowda/goose-db/internal/column"
+import "github.com/harshithgowdakt/granuledb/internal/column"
 
 // BlockSourceOperator emits a single in-memory block.
 type BlockSourceOperator struct {

@@ -226,6 +226,8 @@ func (l *Lexer) readIdentifier() (Token, error) {
 	return Token{Type: tt, Literal: literal, Line: line, Col: col}, nil
 }
 
-func isDigit(ch byte) bool     { return ch >= '0' && ch <= '9' }
-func isIdentStart(ch byte) bool { return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' }
-func isIdentPart(ch byte) bool  { return isIdentStart(ch) || isDigit(ch) }
+func isDigit(ch byte) bool { return ch >= '0' && ch <= '9' }
+func isIdentStart(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+}
+func isIdentPart(ch byte) bool { return isIdentStart(ch) || isDigit(ch) }

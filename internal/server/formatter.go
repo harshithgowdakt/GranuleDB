@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // OutputFormat specifies the result format.

@@ -6,8 +6,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/harshithgowda/goose-db/internal/merge"
-	"github.com/harshithgowda/goose-db/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/merge"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
 
 // Server is the GooseDB HTTP server.

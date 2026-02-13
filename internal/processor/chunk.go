@@ -1,6 +1,6 @@
 package processor
 
-import "github.com/harshithgowda/goose-db/internal/column"
+import "github.com/harshithgowdakt/granuledb/internal/column"
 
 // Chunk is the unit of data flowing between processors through ports.
 type Chunk struct {

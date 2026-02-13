@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/harshithgowda/goose-db/internal/aggstate"
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/parser"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/aggstate"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // AggregateFunc describes an aggregate function to compute.

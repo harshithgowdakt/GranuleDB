@@ -1,8 +1,8 @@
 package processor
 
 import (
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
 )
 
 // SortProcessor materializes all input, sorts, then emits one sorted chunk.

@@ -7,7 +7,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // WriteVarUInt writes a variable-length unsigned integer (same encoding as protobuf varint).

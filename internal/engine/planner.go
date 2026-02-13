@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/harshithgowda/goose-db/internal/parser"
-	"github.com/harshithgowda/goose-db/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
 
 // PlanSelect converts a SELECT AST into an operator tree.

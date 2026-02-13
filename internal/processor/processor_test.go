@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/engine"
-	"github.com/harshithgowda/goose-db/internal/parser"
-	"github.com/harshithgowda/goose-db/internal/processor"
-	"github.com/harshithgowda/goose-db/internal/storage"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/engine"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/processor"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 func setupTestDB(t *testing.T) *storage.Database {
@@ -411,9 +411,9 @@ func TestParallelFilter(t *testing.T) {
 	db, _ := setupTableWithGranuleSize(t, 10)
 
 	// Insert 3 separate batches = 3 parts.
-	insertRows(t, db, "test", 30)  // part 1: id 1-30
-	insertRows(t, db, "test", 30)  // part 2: id 1-30
-	insertRows(t, db, "test", 30)  // part 3: id 1-30
+	insertRows(t, db, "test", 30) // part 1: id 1-30
+	insertRows(t, db, "test", 30) // part 2: id 1-30
+	insertRows(t, db, "test", 30) // part 3: id 1-30
 
 	table, _ := db.GetTable("test")
 	parts := table.GetActiveParts()

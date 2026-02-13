@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
 )
 
 // SortOperator sorts by ORDER BY columns. It materializes all input blocks first.

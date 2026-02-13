@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/harshithgowda/goose-db/internal/server"
-	"github.com/harshithgowda/goose-db/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/server"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
 
 func setupTestServer(t *testing.T) *server.QueryHandler {

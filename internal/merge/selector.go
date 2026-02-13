@@ -1,6 +1,6 @@
 package merge
 
-import "github.com/harshithgowda/goose-db/internal/storage"
+import "github.com/harshithgowdakt/granuledb/internal/storage"
 
 // SimpleMergeSelector picks adjacent parts in the same partition to merge.
 type SimpleMergeSelector struct {

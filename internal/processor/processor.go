@@ -53,9 +53,9 @@ func NewBaseProcessor(name string, numInputs, numOutputs int) BaseProcessor {
 	}
 }
 
-func (b *BaseProcessor) Name() string          { return b.name }
+func (b *BaseProcessor) Name() string           { return b.name }
 func (b *BaseProcessor) Inputs() []*InputPort   { return b.inputs }
-func (b *BaseProcessor) Outputs() []*OutputPort  { return b.outputs }
+func (b *BaseProcessor) Outputs() []*OutputPort { return b.outputs }
 
 // Input returns the i-th input port.
 func (b *BaseProcessor) Input(i int) *InputPort { return b.inputs[i] }

@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/parser"
-	"github.com/harshithgowda/goose-db/internal/storage"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // SelectExecutor is a hook for replacing the SELECT execution path.

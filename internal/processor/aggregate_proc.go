@@ -3,9 +3,9 @@ package processor
 import (
 	"fmt"
 
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/engine"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/engine"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // AggregateProcessor implements hash-based GROUP BY aggregation.

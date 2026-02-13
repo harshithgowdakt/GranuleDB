@@ -6,9 +6,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/harshithgowda/goose-db/internal/column"
-	"github.com/harshithgowda/goose-db/internal/compression"
-	"github.com/harshithgowda/goose-db/internal/types"
+	"github.com/harshithgowdakt/granuledb/internal/column"
+	"github.com/harshithgowdakt/granuledb/internal/compression"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // MergeTreeTable represents a single table with MergeTree engine.

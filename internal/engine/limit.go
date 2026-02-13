@@ -1,12 +1,12 @@
 package engine
 
-import "github.com/harshithgowda/goose-db/internal/column"
+import "github.com/harshithgowdakt/granuledb/internal/column"
 
 // LimitOperator limits the number of output rows.
 type LimitOperator struct {
-	input    Operator
-	limit    int64
-	emitted  int64
+	input   Operator
+	limit   int64
+	emitted int64
 }
 
 func NewLimitOperator(input Operator, limit int64) *LimitOperator {

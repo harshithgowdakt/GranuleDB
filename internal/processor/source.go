@@ -1,8 +1,8 @@
 package processor
 
 import (
-	"github.com/harshithgowda/goose-db/internal/engine"
-	"github.com/harshithgowda/goose-db/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/engine"
+	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
 
 // SourceProcessor reads data from a single storage Part using morsel-driven
@@ -16,12 +16,12 @@ type SourceProcessor struct {
 	columns   []string
 	keyRanges []engine.KeyRange
 
-	granuleBegin int  // start of scan range (after index pruning)
-	granuleEnd   int  // end of scan range
-	currentGran  int  // next granule to read
-	batchSize    int  // granules per Work() call
+	granuleBegin  int  // start of scan range (after index pruning)
+	granuleEnd    int  // end of scan range
+	currentGran   int  // next granule to read
+	batchSize     int  // granules per Work() call
 	rangeResolved bool // true after index pruning is done
-	reader       *storage.PartReader
+	reader        *storage.PartReader
 
 	chunk    *Chunk // produced chunk waiting to be pushed
 	finished bool
