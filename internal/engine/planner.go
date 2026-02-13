@@ -1,0 +1,204 @@
+package engine
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/harshithgowda/goose-db/internal/parser"
+	"github.com/harshithgowda/goose-db/internal/storage"
+)
+
+// PlanSelect converts a SELECT AST into an operator tree.
+// Returns the root operator and the output column names.
+func PlanSelect(stmt *parser.SelectStmt, db *storage.Database) (Operator, []string, error) {
+	table, ok := db.GetTable(stmt.From)
+	if !ok {
+		return nil, nil, fmt.Errorf("table %s not found", stmt.From)
+	}
+
+	// Determine all columns needed from the table
+	neededCols := CollectNeededColumns(stmt, &table.Schema)
+
+	// Extract key ranges from WHERE for primary index pruning
+	keyRanges := ExtractKeyRanges(stmt.Where, table.Schema.OrderBy)
+
+	// Build operator chain bottom-up
+	var op Operator
+
+	// 1. Table scan
+	op = NewTableScanOperator(table, neededCols, keyRanges)
+
+	// 2. Filter (WHERE)
+	if stmt.Where != nil {
+		op = NewFilterOperator(op, stmt.Where)
+	}
+
+	// 3. Aggregate (GROUP BY or aggregate functions without GROUP BY)
+	hasAggs := HasAggregates(stmt.Columns)
+	if len(stmt.GroupBy) > 0 || hasAggs {
+		aggs := ExtractAggregates(stmt.Columns)
+		op = NewAggregateOperator(op, stmt.GroupBy, aggs)
+
+		// After aggregation, build output names from group-by + aggregates
+		outNames := make([]string, 0, len(stmt.GroupBy)+len(aggs))
+		outNames = append(outNames, stmt.GroupBy...)
+		for _, a := range aggs {
+			outNames = append(outNames, a.Alias)
+		}
+		return wrapSortLimit(op, stmt, outNames)
+	}
+
+	// 4. Projection (SELECT columns)
+	proj := NewProjectionOperator(op, stmt.Columns)
+	op = proj
+
+	// Determine output names
+	outNames := make([]string, len(stmt.Columns))
+	for i, se := range stmt.Columns {
+		if se.Alias != "" {
+			outNames[i] = se.Alias
+		} else if _, ok := se.Expr.(*parser.StarExpr); ok {
+			// Will be resolved at runtime
+			return wrapSortLimit(op, stmt, table.Schema.ColumnNames())
+		} else {
+			outNames[i] = ExprName(se.Expr)
+		}
+	}
+
+	return wrapSortLimit(op, stmt, outNames)
+}
+
+func wrapSortLimit(op Operator, stmt *parser.SelectStmt, outNames []string) (Operator, []string, error) {
+	// Sort (ORDER BY)
+	if len(stmt.OrderBy) > 0 {
+		op = NewSortOperator(op, stmt.OrderBy)
+	}
+
+	// Limit
+	if stmt.Limit != nil {
+		op = NewLimitOperator(op, *stmt.Limit)
+	}
+
+	return op, outNames, nil
+}
+
+// CollectNeededColumns determines which table columns are needed.
+func CollectNeededColumns(stmt *parser.SelectStmt, schema *storage.TableSchema) []string {
+	needed := make(map[string]bool)
+
+	// From SELECT expressions
+	for _, se := range stmt.Columns {
+		if _, ok := se.Expr.(*parser.StarExpr); ok {
+			// Need all columns
+			return schema.ColumnNames()
+		}
+		for _, col := range ExprReferencesColumns(se.Expr) {
+			needed[col] = true
+		}
+	}
+
+	// From WHERE
+	if stmt.Where != nil {
+		for _, col := range ExprReferencesColumns(stmt.Where) {
+			needed[col] = true
+		}
+	}
+
+	// From GROUP BY
+	for _, col := range stmt.GroupBy {
+		needed[col] = true
+	}
+
+	// From ORDER BY
+	for _, ob := range stmt.OrderBy {
+		needed[ob.Column] = true
+	}
+
+	// Ensure we have at least the columns referenced
+	result := make([]string, 0, len(needed))
+	for col := range needed {
+		result = append(result, col)
+	}
+
+	if len(result) == 0 {
+		return schema.ColumnNames()
+	}
+	return result
+}
+
+// ExtractKeyRanges extracts simple primary key range conditions from WHERE.
+// Handles patterns like: key >= X, key > X, key <= X, key < X, key = X
+func ExtractKeyRanges(where parser.Expression, orderBy []string) []KeyRange {
+	if where == nil {
+		return nil
+	}
+
+	keySet := make(map[string]bool)
+	for _, k := range orderBy {
+		keySet[k] = true
+	}
+
+	var ranges []KeyRange
+	extractFromExpr(where, keySet, &ranges)
+	return ranges
+}
+
+func extractFromExpr(expr parser.Expression, keySet map[string]bool, ranges *[]KeyRange) {
+	switch e := expr.(type) {
+	case *parser.BinaryExpr:
+		if strings.ToUpper(e.Op) == "AND" {
+			extractFromExpr(e.Left, keySet, ranges)
+			extractFromExpr(e.Right, keySet, ranges)
+			return
+		}
+
+		// Check for column OP literal
+		col, lit, flipped := extractColLiteral(e)
+		if col == "" || !keySet[col] {
+			return
+		}
+
+		op := e.Op
+		if flipped {
+			op = flipOp(op)
+		}
+
+		switch op {
+		case "=":
+			*ranges = append(*ranges, KeyRange{KeyColumn: col, MinVal: lit, MaxVal: nil})
+		case ">", ">=":
+			*ranges = append(*ranges, KeyRange{KeyColumn: col, MinVal: lit, MaxVal: nil})
+		case "<", "<=":
+			*ranges = append(*ranges, KeyRange{KeyColumn: col, MinVal: nil, MaxVal: lit})
+		}
+	}
+}
+
+func extractColLiteral(e *parser.BinaryExpr) (colName string, litVal interface{}, flipped bool) {
+	if ref, ok := e.Left.(*parser.ColumnRef); ok {
+		if lit, ok := e.Right.(*parser.LiteralExpr); ok {
+			return ref.Name, lit.Value, false
+		}
+	}
+	if ref, ok := e.Right.(*parser.ColumnRef); ok {
+		if lit, ok := e.Left.(*parser.LiteralExpr); ok {
+			return ref.Name, lit.Value, true
+		}
+	}
+	return "", nil, false
+}
+
+func flipOp(op string) string {
+	switch op {
+	case "<":
+		return ">"
+	case ">":
+		return "<"
+	case "<=":
+		return ">="
+	case ">=":
+		return "<="
+	default:
+		return op
+	}
+}
