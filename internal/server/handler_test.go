@@ -14,7 +14,7 @@ import (
 
 func setupTestServer(t *testing.T) *server.QueryHandler {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "goosedb-http-test-*")
+	dir, err := os.MkdirTemp("", "granuledb-http-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

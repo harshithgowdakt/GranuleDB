@@ -15,7 +15,7 @@ import (
 // benchSetup creates a database with a table and inserts rows across numParts parts.
 func benchSetup(b *testing.B, rowsPerPart, numParts int) *storage.Database {
 	b.Helper()
-	dir, err := os.MkdirTemp("", "goosedb-bench-*")
+	dir, err := os.MkdirTemp("", "granuledb-bench-*")
 	if err != nil {
 		b.Fatal(err)
 	}

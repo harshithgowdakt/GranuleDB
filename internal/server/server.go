@@ -10,7 +10,7 @@ import (
 	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
 
-// Server is the GooseDB HTTP server.
+// Server is the granuledb HTTP server.
 type Server struct {
 	db      *storage.Database
 	merger  *merge.BackgroundMerger
@@ -48,7 +48,7 @@ func (s *Server) Start(ctx context.Context) error {
 		srv.Shutdown(context.Background())
 	}()
 
-	log.Printf("GooseDB server listening on %s", s.addr)
-	fmt.Printf("GooseDB server listening on %s\n", s.addr)
+	log.Printf("granuledb server listening on %s", s.addr)
+	fmt.Printf("granuledb server listening on %s\n", s.addr)
 	return srv.ListenAndServe()
 }

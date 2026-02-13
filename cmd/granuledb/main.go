@@ -37,7 +37,7 @@ func init() {
 }
 
 func main() {
-	dataDir := flag.String("data-dir", "./goosedb-data", "Data directory path")
+	dataDir := flag.String("data-dir", "./granuledb-data", "Data directory path")
 	addr := flag.String("addr", ":8123", "HTTP server address")
 	flag.Parse()
 
@@ -47,7 +47,7 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	fmt.Printf("GooseDB - A simplified ClickHouse-like columnar database\n")
+	fmt.Printf("granuledb - A simplified ClickHouse-like columnar database\n")
 	fmt.Printf("Data directory: %s\n", *dataDir)
 
 	// Setup graceful shutdown

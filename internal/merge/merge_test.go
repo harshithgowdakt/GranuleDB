@@ -12,7 +12,7 @@ import (
 )
 
 func TestMergeExecution(t *testing.T) {
-	dir, err := os.MkdirTemp("", "goosedb-merge-test-*")
+	dir, err := os.MkdirTemp("", "granuledb-merge-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestMergeSelector(t *testing.T) {
 }
 
 func TestAggregatingMergeTreeCollapse(t *testing.T) {
-	dir, err := os.MkdirTemp("", "goosedb-agg-merge-test-*")
+	dir, err := os.MkdirTemp("", "granuledb-agg-merge-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

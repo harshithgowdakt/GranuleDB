@@ -12,7 +12,7 @@ import (
 
 func setupTestDB(t *testing.T) *storage.Database {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "goosedb-test-*")
+	dir, err := os.MkdirTemp("", "granuledb-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

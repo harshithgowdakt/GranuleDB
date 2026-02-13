@@ -16,7 +16,7 @@ import (
 
 func setupTestDB(t *testing.T) *storage.Database {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "goosedb-proc-test-*")
+	dir, err := os.MkdirTemp("", "granuledb-proc-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestProcessorIntegration(t *testing.T) {
 // so we can create multi-granule parts for testing streaming source.
 func setupTableWithGranuleSize(t *testing.T, granuleSize int) (*storage.Database, *storage.MergeTreeTable) {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "goosedb-parallel-*")
+	dir, err := os.MkdirTemp("", "granuledb-parallel-*")
 	if err != nil {
 		t.Fatal(err)
 	}

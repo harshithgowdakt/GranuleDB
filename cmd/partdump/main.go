@@ -56,7 +56,7 @@ type dumpJSON struct {
 }
 
 func main() {
-	dataDir := flag.String("data-dir", "./goosedb-data", "Database data directory")
+	dataDir := flag.String("data-dir", "./granuledb-data", "Database data directory")
 	tableName := flag.String("table", "", "Table name")
 	partName := flag.String("part", "", "Part directory name (e.g. all_1_1_0)")
 	flag.Parse()
