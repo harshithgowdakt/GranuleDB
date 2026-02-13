@@ -336,6 +336,122 @@ func TestPartitionByColumnBackwardCompat(t *testing.T) {
 	}
 }
 
+func TestLowCardinalityCreateInsertSelect(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE lc_test (id UInt64, status LowCardinality(String), value Int64) ENGINE = MergeTree() ORDER BY (id)`)
+
+	execSQL(t, db, `INSERT INTO lc_test VALUES (1, 'active', 100), (2, 'inactive', 200), (3, 'active', 300), (4, 'pending', 400), (5, 'active', 500)`)
+
+	result := execSQL(t, db, `SELECT id, status, value FROM lc_test ORDER BY id`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 5 {
+		t.Fatalf("expected 5 rows, got %d", totalRows)
+	}
+
+	// Verify first row values
+	if len(result.Blocks) > 0 {
+		block := result.Blocks[0]
+		idCol, _ := block.GetColumn("id")
+		statusCol, _ := block.GetColumn("status")
+		if idCol.Value(0).(uint64) != 1 {
+			t.Fatalf("expected id=1, got %v", idCol.Value(0))
+		}
+		if statusCol.Value(0).(string) != "active" {
+			t.Fatalf("expected status='active', got %v", statusCol.Value(0))
+		}
+	}
+}
+
+func TestLowCardinalityWithGroupBy(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE lc_group (id UInt64, category LowCardinality(String), amount Int64) ENGINE = MergeTree() ORDER BY (id)`)
+	execSQL(t, db, `INSERT INTO lc_group VALUES (1, 'a', 10), (2, 'b', 20), (3, 'a', 30), (4, 'b', 40), (5, 'a', 50)`)
+
+	result := execSQL(t, db, `SELECT category, count(*), sum(amount) FROM lc_group GROUP BY category`)
+	if len(result.Blocks) == 0 {
+		t.Fatal("expected results")
+	}
+	block := result.Blocks[0]
+	if block.NumRows() != 2 {
+		t.Fatalf("expected 2 groups, got %d", block.NumRows())
+	}
+}
+
+func TestLowCardinalityWithWhere(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE lc_where (id UInt64, status LowCardinality(String)) ENGINE = MergeTree() ORDER BY (id)`)
+	execSQL(t, db, `INSERT INTO lc_where VALUES (1, 'active'), (2, 'inactive'), (3, 'active'), (4, 'deleted'), (5, 'active')`)
+
+	result := execSQL(t, db, `SELECT id FROM lc_where WHERE id > 2`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 3 {
+		t.Fatalf("expected 3 rows where id > 2, got %d", totalRows)
+	}
+}
+
+func TestLowCardinalityMultipleInserts(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE lc_multi (id UInt64, tag LowCardinality(String)) ENGINE = MergeTree() ORDER BY (id)`)
+	execSQL(t, db, `INSERT INTO lc_multi VALUES (1, 'x')`)
+	execSQL(t, db, `INSERT INTO lc_multi VALUES (2, 'y')`)
+	execSQL(t, db, `INSERT INTO lc_multi VALUES (3, 'x')`)
+
+	result := execSQL(t, db, `SELECT id, tag FROM lc_multi ORDER BY id`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 3 {
+		t.Fatalf("expected 3 rows, got %d", totalRows)
+	}
+
+	// Verify table has 3 parts
+	table, _ := db.GetTable("lc_multi")
+	parts := table.GetActiveParts()
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 parts, got %d", len(parts))
+	}
+}
+
+func TestLowCardinalityMixedColumns(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE lc_mixed (id UInt64, name String, status LowCardinality(String), value Int64) ENGINE = MergeTree() ORDER BY (id)`)
+	execSQL(t, db, `INSERT INTO lc_mixed VALUES (1, 'alice', 'active', 100), (2, 'bob', 'inactive', 200), (3, 'charlie', 'active', 300)`)
+
+	result := execSQL(t, db, `SELECT * FROM lc_mixed ORDER BY id`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 3 {
+		t.Fatalf("expected 3 rows, got %d", totalRows)
+	}
+
+	// Verify mixed column types
+	if len(result.Blocks) > 0 {
+		block := result.Blocks[0]
+		nameCol, _ := block.GetColumn("name")
+		statusCol, _ := block.GetColumn("status")
+		if nameCol.Value(0).(string) != "alice" {
+			t.Fatalf("expected name='alice', got %v", nameCol.Value(0))
+		}
+		if statusCol.Value(0).(string) != "active" {
+			t.Fatalf("expected status='active', got %v", statusCol.Value(0))
+		}
+	}
+}
+
 func TestExprToSQLRoundTrip(t *testing.T) {
 	tests := []struct {
 		input string

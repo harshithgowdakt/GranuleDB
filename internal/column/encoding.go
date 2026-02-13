@@ -121,6 +121,8 @@ func encodeColumnTo(w io.Writer, col Column) error {
 			}
 		}
 		return nil
+	case *LowCardinalityColumn:
+		return encodeLCColumnTo(w, c)
 	default:
 		return fmt.Errorf("unsupported column type for encoding: %T", col)
 	}
@@ -362,6 +364,66 @@ func (b *byteReaderWrapper) ReadByte() (byte, error) {
 
 func (b *byteReaderWrapper) Read(p []byte) (int, error) {
 	return b.r.Read(p)
+}
+
+// encodeLCColumnTo encodes a LowCardinalityColumn: dictSize + dict data + uint32 indices.
+func encodeLCColumnTo(w io.Writer, c *LowCardinalityColumn) error {
+	// Write dictionary size
+	if err := WriteVarUInt(w, uint64(c.Dict.Len())); err != nil {
+		return err
+	}
+	// Write dictionary column
+	if err := encodeColumnTo(w, c.Dict); err != nil {
+		return err
+	}
+	// Write indices as uint32 little-endian
+	for _, idx := range c.Indices {
+		if err := binary.Write(w, binary.LittleEndian, idx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DecodeLCColumn decodes a LowCardinalityColumn from binary data.
+func DecodeLCColumn(dt types.DataType, data []byte, numRows int) (Column, error) {
+	r := bytes.NewReader(data)
+	return decodeLCColumnFrom(dt, r, numRows)
+}
+
+func decodeLCColumnFrom(dt types.DataType, r io.Reader, numRows int) (Column, error) {
+	br, ok := r.(io.ByteReader)
+	if !ok {
+		br = newByteReaderWrapper(r)
+		r = br.(io.Reader)
+	}
+
+	// Read dictionary size
+	dictSize, err := ReadVarUInt(br)
+	if err != nil {
+		return nil, fmt.Errorf("reading LC dict size: %w", err)
+	}
+
+	// Decode dictionary column
+	dict, err := decodeColumnFrom(dt, r, int(dictSize))
+	if err != nil {
+		return nil, fmt.Errorf("decoding LC dict: %w", err)
+	}
+
+	// Read uint32 indices
+	indices := make([]uint32, numRows)
+	for i := 0; i < numRows; i++ {
+		if err := binary.Read(r, binary.LittleEndian, &indices[i]); err != nil {
+			return nil, fmt.Errorf("reading LC index at row %d: %w", i, err)
+		}
+	}
+
+	lc := &LowCardinalityColumn{
+		Dict:    dict,
+		Indices: indices,
+	}
+	lc.RebuildLookup()
+	return lc, nil
 }
 
 // Helper: encode fixed-size numeric values more efficiently using unsafe-like batch writes.

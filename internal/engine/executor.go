@@ -49,11 +49,11 @@ func executeCreate(stmt *parser.CreateTableStmt, db *storage.Database) (*Execute
 	}
 
 	for _, col := range stmt.Columns {
-		dt, err := types.ParseDataType(col.TypeName)
+		dt, isLC, err := types.ParseColumnType(col.TypeName)
 		if err != nil {
 			return nil, fmt.Errorf("column %s: %w", col.Name, err)
 		}
-		schema.Columns = append(schema.Columns, storage.ColumnDef{Name: col.Name, DataType: dt})
+		schema.Columns = append(schema.Columns, storage.ColumnDef{Name: col.Name, DataType: dt, IsLowCardinality: isLC})
 	}
 
 	err := db.CreateTable(stmt.TableName, schema)
@@ -92,7 +92,11 @@ func executeInsert(stmt *parser.InsertStmt, db *storage.Database) (*ExecuteResul
 		if !ok {
 			return nil, fmt.Errorf("column %s not found in table %s", name, stmt.TableName)
 		}
-		cols[i] = column.NewColumnWithCapacity(colDef.DataType, len(stmt.Values))
+		if colDef.IsLowCardinality {
+			cols[i] = column.NewLowCardinalityColumn(colDef.DataType, len(stmt.Values))
+		} else {
+			cols[i] = column.NewColumnWithCapacity(colDef.DataType, len(stmt.Values))
+		}
 	}
 
 	// Convert literal values and populate columns
@@ -148,7 +152,12 @@ func computePartitions(block *column.Block, partitionBySQL string) (map[string]*
 		cols := make([]column.Column, block.NumColumns())
 		for c := range block.NumColumns() {
 			srcCol := block.Columns[c]
-			newCol := column.NewColumnWithCapacity(srcCol.DataType(), len(rows))
+			var newCol column.Column
+			if _, isLC := srcCol.(*column.LowCardinalityColumn); isLC {
+				newCol = column.NewLowCardinalityColumn(srcCol.DataType(), len(rows))
+			} else {
+				newCol = column.NewColumnWithCapacity(srcCol.DataType(), len(rows))
+			}
 			for _, rowIdx := range rows {
 				newCol.Append(srcCol.Value(rowIdx))
 			}

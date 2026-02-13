@@ -155,6 +155,10 @@ func evalUnaryColumn(e *parser.UnaryExpr, block *column.Block) (column.Column, t
 
 // columnToFloat64Slice type-switches once then converts the entire typed slice to []float64.
 func columnToFloat64Slice(col column.Column, dt types.DataType) []float64 {
+	// Materialize LowCardinality columns first.
+	if lc, ok := col.(*column.LowCardinalityColumn); ok {
+		return columnToFloat64Slice(lc.Materialize(), dt)
+	}
 	switch c := col.(type) {
 	case *column.UInt8Column:
 		return convertSlice(c.Data)
@@ -208,6 +212,10 @@ func convertSlice[T numeric](data []T) []float64 {
 
 // ColumnToBoolMask converts a numeric column to []bool (nonzero = true).
 func ColumnToBoolMask(col column.Column, dt types.DataType) []bool {
+	// Materialize LowCardinality columns first.
+	if lc, ok := col.(*column.LowCardinalityColumn); ok {
+		return ColumnToBoolMask(lc.Materialize(), dt)
+	}
 	switch c := col.(type) {
 	case *column.UInt8Column:
 		return toBoolSlice(c.Data)
@@ -272,6 +280,17 @@ func boolMaskToInt64Column(mask []bool) *column.Int64Column {
 
 // columnToStringSlice extracts string representations from a column.
 func columnToStringSlice(col column.Column, dt types.DataType) []string {
+	// Optimize for LC wrapping String: resolve through dict.
+	if lc, ok := col.(*column.LowCardinalityColumn); ok {
+		if sc, ok := lc.Dict.(*column.StringColumn); ok {
+			out := make([]string, len(lc.Indices))
+			for i, idx := range lc.Indices {
+				out[i] = sc.Data[idx]
+			}
+			return out
+		}
+		return columnToStringSlice(lc.Materialize(), dt)
+	}
 	if c, ok := col.(*column.StringColumn); ok {
 		return c.Data
 	}

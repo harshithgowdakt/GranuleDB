@@ -4,8 +4,9 @@ import "github.com/harshithgowda/goose-db/internal/types"
 
 // ColumnDef defines a column in a table schema.
 type ColumnDef struct {
-	Name     string
-	DataType types.DataType
+	Name             string
+	DataType         types.DataType
+	IsLowCardinality bool
 }
 
 // TableSchema defines the schema and engine settings for a MergeTree table.

@@ -125,7 +125,13 @@ func (pr *PartReader) readColumnGranules(colName string, dt types.DataType, gran
 		}
 
 		// Decode column data
-		col, err := column.DecodeColumn(dt, decompressed, rowsInGranule)
+		var col column.Column
+		colDef2, _ := pr.schema.GetColumnDef(colName)
+		if colDef2.IsLowCardinality {
+			col, err = column.DecodeLCColumn(dt, decompressed, rowsInGranule)
+		} else {
+			col, err = column.DecodeColumn(dt, decompressed, rowsInGranule)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("decoding granule %d: %w", g, err)
 		}

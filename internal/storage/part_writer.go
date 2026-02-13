@@ -220,7 +220,13 @@ func (pw *PartWriter) writeColumnsFile(dir string) error {
 	for _, c := range pw.schema.Columns {
 		sb.WriteString(c.Name)
 		sb.WriteByte('\t')
-		sb.WriteString(c.DataType.Name())
+		if c.IsLowCardinality {
+			sb.WriteString("LowCardinality(")
+			sb.WriteString(c.DataType.Name())
+			sb.WriteByte(')')
+		} else {
+			sb.WriteString(c.DataType.Name())
+		}
 		sb.WriteByte('\n')
 	}
 	return os.WriteFile(filepath.Join(dir, "columns.txt"), []byte(sb.String()), 0644)

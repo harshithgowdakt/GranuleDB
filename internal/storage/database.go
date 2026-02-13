@@ -206,14 +206,17 @@ func parsePartDirName(name string) (*PartInfo, error) {
 
 // tableSchemaJSON is the JSON representation of a table schema saved to disk.
 type tableSchemaJSON struct {
-	Name    string `json:"name"`
-	Columns []struct {
-		Name     string `json:"name"`
-		DataType string `json:"data_type"`
-	} `json:"columns"`
+	Name    string            `json:"name"`
+	Columns []columnSchemaJSON `json:"columns"`
 	OrderBy     []string `json:"order_by"`
 	PartitionBy string   `json:"partition_by,omitempty"`
 	GranuleSize int      `json:"granule_size"`
+}
+
+type columnSchemaJSON struct {
+	Name            string `json:"name"`
+	DataType        string `json:"data_type"`
+	LowCardinality  bool   `json:"low_cardinality,omitempty"`
 }
 
 func saveTableSchema(tableDir, name string, schema *TableSchema) error {
@@ -224,12 +227,10 @@ func saveTableSchema(tableDir, name string, schema *TableSchema) error {
 		GranuleSize: schema.EffectiveGranuleSize(),
 	}
 	for _, c := range schema.Columns {
-		j.Columns = append(j.Columns, struct {
-			Name     string `json:"name"`
-			DataType string `json:"data_type"`
-		}{
-			Name:     c.Name,
-			DataType: c.DataType.Name(),
+		j.Columns = append(j.Columns, columnSchemaJSON{
+			Name:           c.Name,
+			DataType:       c.DataType.Name(),
+			LowCardinality: c.IsLowCardinality,
 		})
 	}
 	data, err := json.MarshalIndent(j, "", "  ")
@@ -258,7 +259,7 @@ func loadTableSchema(tableDir string) (*TableSchema, error) {
 		if err != nil {
 			return nil, err
 		}
-		schema.Columns = append(schema.Columns, ColumnDef{Name: c.Name, DataType: dt})
+		schema.Columns = append(schema.Columns, ColumnDef{Name: c.Name, DataType: dt, IsLowCardinality: c.LowCardinality})
 	}
 	return schema, nil
 }

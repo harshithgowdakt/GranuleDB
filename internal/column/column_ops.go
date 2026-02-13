@@ -28,6 +28,11 @@ func FilterByMask(col Column, mask []bool) Column {
 		return &StringColumn{Data: filterSlice(c.Data, mask)}
 	case *DateTimeColumn:
 		return &DateTimeColumn{Data: filterSlice(c.Data, mask)}
+	case *LowCardinalityColumn:
+		return &LowCardinalityColumn{
+			Dict:    c.Dict,
+			Indices: filterSlice(c.Indices, mask),
+		}
 	default:
 		panic("FilterByMask: unsupported column type")
 	}
@@ -61,6 +66,11 @@ func Gather(col Column, indices []int) Column {
 		return &StringColumn{Data: gatherSlice(c.Data, indices)}
 	case *DateTimeColumn:
 		return &DateTimeColumn{Data: gatherSlice(c.Data, indices)}
+	case *LowCardinalityColumn:
+		return &LowCardinalityColumn{
+			Dict:    c.Dict,
+			Indices: gatherSlice(c.Indices, indices),
+		}
 	default:
 		panic("Gather: unsupported column type")
 	}
@@ -94,7 +104,34 @@ func AppendColumn(dst, src Column) {
 		d.Data = appendSlice(d.Data, src.(*StringColumn).Data)
 	case *DateTimeColumn:
 		d.Data = appendSlice(d.Data, src.(*DateTimeColumn).Data)
+	case *LowCardinalityColumn:
+		s := src.(*LowCardinalityColumn)
+		appendLCColumn(d, s)
 	default:
 		panic("AppendColumn: unsupported column type")
+	}
+}
+
+// appendLCColumn merges src LC column into dst, remapping indices.
+func appendLCColumn(dst, src *LowCardinalityColumn) {
+	if dst.lookup == nil {
+		dst.RebuildLookup()
+	}
+	// Build index remapping: src dict position → dst dict position
+	remap := make([]uint32, src.Dict.Len())
+	for i := 0; i < src.Dict.Len(); i++ {
+		v := src.Dict.Value(i)
+		if idx, ok := dst.lookup[v]; ok {
+			remap[i] = idx
+		} else {
+			idx := uint32(dst.Dict.Len())
+			dst.Dict.Append(v)
+			dst.lookup[v] = idx
+			remap[i] = idx
+		}
+	}
+	// Append remapped indices
+	for _, srcIdx := range src.Indices {
+		dst.Indices = append(dst.Indices, remap[srcIdx])
 	}
 }

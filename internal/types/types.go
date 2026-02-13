@@ -69,6 +69,23 @@ func ParseDataType(name string) (DataType, error) {
 	return dt, nil
 }
 
+// ParseColumnType parses a column type that may be wrapped in LowCardinality(...).
+// Returns (innerType, isLowCardinality, error).
+func ParseColumnType(name string) (DataType, bool, error) {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if strings.HasPrefix(lower, "lowcardinality(") && strings.HasSuffix(lower, ")") {
+		inner := name[len("lowcardinality(") : len(name)-1]
+		inner = strings.TrimSpace(inner)
+		dt, err := ParseDataType(inner)
+		if err != nil {
+			return 0, false, fmt.Errorf("LowCardinality inner type: %w", err)
+		}
+		return dt, true, nil
+	}
+	dt, err := ParseDataType(name)
+	return dt, false, err
+}
+
 // Name returns the string name of the DataType.
 func (dt DataType) Name() string {
 	if ti, ok := TypeInfoMap[dt]; ok {

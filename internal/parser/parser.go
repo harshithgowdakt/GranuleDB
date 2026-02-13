@@ -136,9 +136,24 @@ func (p *Parser) parseCreateTable() (*CreateTableStmt, error) {
 		if err != nil {
 			return nil, err
 		}
+		typeName := colType.Literal
+		// Handle LowCardinality(InnerType)
+		if strings.ToLower(typeName) == "lowcardinality" {
+			if _, err := p.expect(TokenLParen); err != nil {
+				return nil, err
+			}
+			innerType, err := p.expect(TokenIdentifier)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.expect(TokenRParen); err != nil {
+				return nil, err
+			}
+			typeName = "LowCardinality(" + innerType.Literal + ")"
+		}
 		stmt.Columns = append(stmt.Columns, ColumnDefNode{
 			Name:     colName.Literal,
-			TypeName: colType.Literal,
+			TypeName: typeName,
 		})
 		if !p.match(TokenComma) {
 			break
