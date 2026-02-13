@@ -250,3 +250,110 @@ func TestAllDataTypes(t *testing.T) {
 		t.Fatal("expected 1 row")
 	}
 }
+
+func TestPartitionByExpression(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE events (id UInt64, ts DateTime, value Int64) ENGINE = MergeTree() ORDER BY (id) PARTITION BY toYYYYMM(ts)`)
+
+	// Jan 2024: 1704067200 (2024-01-01 00:00:00 UTC), 1704153600 (2024-01-02)
+	// Feb 2024: 1706745600 (2024-02-01 00:00:00 UTC), 1706832000 (2024-02-02)
+	execSQL(t, db, `INSERT INTO events VALUES (1, 1704067200, 100), (2, 1704153600, 200), (3, 1706745600, 300), (4, 1706832000, 400)`)
+
+	// Should create 2 partitions: 202401 and 202402
+	table, _ := db.GetTable("events")
+	parts := table.GetActiveParts()
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 partitions, got %d", len(parts))
+	}
+
+	// Verify partition IDs
+	pids := map[string]bool{}
+	for _, p := range parts {
+		pids[p.Info.PartitionID] = true
+	}
+	if !pids["202401"] || !pids["202402"] {
+		t.Fatalf("expected partition IDs 202401 and 202402, got %v", pids)
+	}
+
+	// Verify all data is queryable
+	result := execSQL(t, db, `SELECT id, value FROM events ORDER BY id`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 4 {
+		t.Fatalf("expected 4 rows, got %d", totalRows)
+	}
+}
+
+func TestPartitionByIntDiv(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE data (id UInt64, value Int64) ENGINE = MergeTree() ORDER BY (id) PARTITION BY intDiv(id, 1000)`)
+
+	execSQL(t, db, `INSERT INTO data VALUES (1, 10), (500, 20), (999, 30), (1000, 40), (1500, 50), (2000, 60)`)
+
+	// Should create 3 partitions: 0, 1, 2
+	table, _ := db.GetTable("data")
+	parts := table.GetActiveParts()
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 partitions, got %d", len(parts))
+	}
+
+	// Verify all data queryable
+	result := execSQL(t, db, `SELECT id, value FROM data ORDER BY id`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 6 {
+		t.Fatalf("expected 6 rows, got %d", totalRows)
+	}
+}
+
+func TestPartitionByColumnBackwardCompat(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Old-style PARTITION BY column_name should still work
+	execSQL(t, db, `CREATE TABLE events2 (id UInt64, region String, value Int64) ENGINE = MergeTree() ORDER BY (id) PARTITION BY region`)
+
+	execSQL(t, db, `INSERT INTO events2 VALUES (1, 'us', 100), (2, 'eu', 200), (3, 'us', 300)`)
+
+	table, _ := db.GetTable("events2")
+	parts := table.GetActiveParts()
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 partitions, got %d", len(parts))
+	}
+
+	result := execSQL(t, db, `SELECT id FROM events2 ORDER BY id`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 3 {
+		t.Fatalf("expected 3 rows, got %d", totalRows)
+	}
+}
+
+func TestExprToSQLRoundTrip(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"region", "region"},
+		{"toyyyymm(date)", "toyyyymm(date)"},
+		{"intdiv(id, 1000)", "intdiv(id, 1000)"},
+	}
+
+	for _, tt := range tests {
+		expr, err := parser.ParseExpression(tt.input)
+		if err != nil {
+			t.Fatalf("ParseExpression(%q): %v", tt.input, err)
+		}
+		got := parser.ExprToSQL(expr)
+		if got != tt.want {
+			t.Fatalf("ExprToSQL round-trip: input=%q, got=%q, want=%q", tt.input, got, tt.want)
+		}
+	}
+}

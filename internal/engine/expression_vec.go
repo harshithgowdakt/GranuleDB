@@ -31,7 +31,10 @@ func EvalExprColumn(expr parser.Expression, block *column.Block) (column.Column,
 		return evalUnaryColumn(e, block)
 
 	case *parser.FunctionCall:
-		return nil, 0, fmt.Errorf("function %s cannot be evaluated as vectorized column expression", e.Name)
+		if isAggregateFunc(e.Name) {
+			return nil, 0, fmt.Errorf("aggregate function %s cannot be evaluated as vectorized column expression", e.Name)
+		}
+		return evalScalarFuncColumn(e, block)
 
 	case *parser.StarExpr:
 		return nil, 0, fmt.Errorf("* cannot be evaluated as an expression")

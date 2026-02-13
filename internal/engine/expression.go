@@ -38,9 +38,10 @@ func EvalExpr(expr parser.Expression, block *column.Block, row int) (types.Value
 		return evalUnary(e, block, row)
 
 	case *parser.FunctionCall:
-		// Functions like count, sum, etc. are handled in the aggregate operator.
-		// Here we handle scalar functions if any.
-		return nil, 0, fmt.Errorf("function %s cannot be evaluated row-by-row", e.Name)
+		if isAggregateFunc(e.Name) {
+			return nil, 0, fmt.Errorf("aggregate function %s cannot be evaluated row-by-row", e.Name)
+		}
+		return evalScalarFunc(e, block, row)
 
 	case *parser.StarExpr:
 		return nil, 0, fmt.Errorf("* cannot be evaluated as an expression")

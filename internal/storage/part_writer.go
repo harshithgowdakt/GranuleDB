@@ -70,10 +70,12 @@ func (pw *PartWriter) WritePart(block *column.Block, info PartInfo) (*Part, erro
 		return nil, fmt.Errorf("writing primary index: %w", err)
 	}
 
-	// Write min-max index for partition key column
+	// Write min-max index for partition key column (only for simple column references).
 	if pw.schema.PartitionBy != "" {
-		if err := pw.writeMinMaxIndex(tmpDir, block); err != nil {
-			return nil, fmt.Errorf("writing minmax index: %w", err)
+		if _, isCol := pw.schema.GetColumnDef(pw.schema.PartitionBy); isCol {
+			if err := pw.writeMinMaxIndex(tmpDir, block); err != nil {
+				return nil, fmt.Errorf("writing minmax index: %w", err)
+			}
 		}
 	}
 

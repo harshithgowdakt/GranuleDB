@@ -1,5 +1,11 @@
 package parser
 
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
 // Statement is the top-level AST node.
 type Statement interface {
 	statementNode()
@@ -14,7 +20,7 @@ type CreateTableStmt struct {
 	Columns     []ColumnDefNode
 	Engine      string   // "MergeTree"
 	OrderBy     []string // primary key columns
-	PartitionBy string   // column name or empty
+	PartitionBy Expression // partition expression, or nil if not specified
 }
 
 func (*CreateTableStmt) statementNode() {}
@@ -121,3 +127,39 @@ func (*FunctionCall) exprNode() {}
 type StarExpr struct{}
 
 func (*StarExpr) exprNode() {}
+
+// ExprToSQL converts an Expression AST back to its SQL text representation.
+func ExprToSQL(expr Expression) string {
+	if expr == nil {
+		return ""
+	}
+	switch e := expr.(type) {
+	case *ColumnRef:
+		return e.Name
+	case *LiteralExpr:
+		switch v := e.Value.(type) {
+		case string:
+			return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+		case int64:
+			return strconv.FormatInt(v, 10)
+		case float64:
+			return strconv.FormatFloat(v, 'f', -1, 64)
+		default:
+			return fmt.Sprintf("%v", v)
+		}
+	case *FunctionCall:
+		args := make([]string, len(e.Args))
+		for i, a := range e.Args {
+			args[i] = ExprToSQL(a)
+		}
+		return e.Name + "(" + strings.Join(args, ", ") + ")"
+	case *BinaryExpr:
+		return ExprToSQL(e.Left) + " " + e.Op + " " + ExprToSQL(e.Right)
+	case *UnaryExpr:
+		return e.Op + " " + ExprToSQL(e.Expr)
+	case *StarExpr:
+		return "*"
+	default:
+		return "?"
+	}
+}

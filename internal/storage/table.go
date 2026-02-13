@@ -105,6 +105,38 @@ func (t *MergeTreeTable) splitByPartition(block *column.Block) (map[string]*colu
 	return result, nil
 }
 
+// InsertPartitioned writes pre-partitioned blocks. The caller has already
+// split the block by partition ID using arbitrary expression evaluation.
+func (t *MergeTreeTable) InsertPartitioned(partitions map[string]*column.Block) error {
+	codec := &compression.LZ4Codec{}
+	writer := NewPartWriter(&t.Schema, t.DataDir, codec)
+
+	for partitionID, subBlock := range partitions {
+		if err := subBlock.SortByColumns(t.Schema.OrderBy); err != nil {
+			return fmt.Errorf("sorting block: %w", err)
+		}
+
+		blockNum := t.blockCounter.Add(1)
+		info := PartInfo{
+			PartitionID: partitionID,
+			MinBlock:    blockNum,
+			MaxBlock:    blockNum,
+			Level:       0,
+		}
+
+		part, err := writer.WritePart(subBlock, info)
+		if err != nil {
+			return fmt.Errorf("writing part: %w", err)
+		}
+
+		t.mu.Lock()
+		t.parts = append(t.parts, part)
+		t.mu.Unlock()
+	}
+
+	return nil
+}
+
 // GetActiveParts returns all parts with state == PartActive.
 func (t *MergeTreeTable) GetActiveParts() []*Part {
 	t.mu.RLock()

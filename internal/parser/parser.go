@@ -178,17 +178,17 @@ func (p *Parser) parseCreateTable() (*CreateTableStmt, error) {
 		}
 	}
 
-	// PARTITION BY col
+	// PARTITION BY expr
 	if p.peek().Type == TokenPARTITION {
 		p.advance()
 		if err := p.expectKeyword(TokenBY); err != nil {
 			return nil, err
 		}
-		colTok, err := p.expect(TokenIdentifier)
+		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
-		stmt.PartitionBy = colTok.Literal
+		stmt.PartitionBy = expr
 	}
 
 	return stmt, nil
@@ -663,4 +663,22 @@ func (p *Parser) parseColumnList() ([]string, error) {
 		return nil, err
 	}
 	return []string{tok.Literal}, nil
+}
+
+// ParseExpression parses a standalone SQL expression string into an AST Expression.
+func ParseExpression(sql string) (Expression, error) {
+	lexer := NewLexer(sql)
+	tokens, err := lexer.Tokenize()
+	if err != nil {
+		return nil, err
+	}
+	p := NewParser(tokens)
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Type != TokenEOF && p.peek().Type != TokenSemicolon {
+		return nil, fmt.Errorf("unexpected token after expression: %q", p.peek().Literal)
+	}
+	return expr, nil
 }

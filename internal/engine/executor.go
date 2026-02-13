@@ -45,7 +45,7 @@ func Execute(stmt parser.Statement, db *storage.Database) (*ExecuteResult, error
 func executeCreate(stmt *parser.CreateTableStmt, db *storage.Database) (*ExecuteResult, error) {
 	schema := storage.TableSchema{
 		OrderBy:     stmt.OrderBy,
-		PartitionBy: stmt.PartitionBy,
+		PartitionBy: parser.ExprToSQL(stmt.PartitionBy),
 	}
 
 	for _, col := range stmt.Columns {
@@ -108,11 +108,58 @@ func executeInsert(stmt *parser.InsertStmt, db *storage.Database) (*ExecuteResul
 	}
 
 	block := column.NewBlock(colNames, cols)
-	if err := table.Insert(block); err != nil {
+
+	// Compute partition IDs and insert.
+	partitions, err := computePartitions(block, table.Schema.PartitionBy)
+	if err != nil {
+		return nil, err
+	}
+	if err := table.InsertPartitioned(partitions); err != nil {
 		return nil, err
 	}
 
 	return &ExecuteResult{Message: fmt.Sprintf("OK. %d rows inserted.", len(stmt.Values))}, nil
+}
+
+// computePartitions evaluates a partition expression per row and splits the block
+// into sub-blocks keyed by the string representation of the partition value.
+func computePartitions(block *column.Block, partitionBySQL string) (map[string]*column.Block, error) {
+	if partitionBySQL == "" {
+		return map[string]*column.Block{"all": block}, nil
+	}
+
+	partExpr, err := parser.ParseExpression(partitionBySQL)
+	if err != nil {
+		return nil, fmt.Errorf("parsing partition expression %q: %w", partitionBySQL, err)
+	}
+
+	partRows := make(map[string][]int)
+	for i := 0; i < block.NumRows(); i++ {
+		val, dt, err := EvalExpr(partExpr, block, i)
+		if err != nil {
+			return nil, fmt.Errorf("evaluating partition expr at row %d: %w", i, err)
+		}
+		pid := types.ValueToString(dt, val)
+		partRows[pid] = append(partRows[pid], i)
+	}
+
+	result := make(map[string]*column.Block, len(partRows))
+	for pid, rows := range partRows {
+		cols := make([]column.Column, block.NumColumns())
+		for c := range block.NumColumns() {
+			srcCol := block.Columns[c]
+			newCol := column.NewColumnWithCapacity(srcCol.DataType(), len(rows))
+			for _, rowIdx := range rows {
+				newCol.Append(srcCol.Value(rowIdx))
+			}
+			cols[c] = newCol
+		}
+		names := make([]string, len(block.ColumnNames))
+		copy(names, block.ColumnNames)
+		result[pid] = column.NewBlock(names, cols)
+	}
+
+	return result, nil
 }
 
 func executeSelect(stmt *parser.SelectStmt, db *storage.Database) (*ExecuteResult, error) {
