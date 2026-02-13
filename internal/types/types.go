@@ -9,7 +9,7 @@ import (
 type DataType uint8
 
 const (
-	TypeUInt8    DataType = iota
+	TypeUInt8 DataType = iota
 	TypeUInt16
 	TypeUInt32
 	TypeUInt64
@@ -20,7 +20,8 @@ const (
 	TypeFloat32
 	TypeFloat64
 	TypeString
-	TypeDateTime // stored as uint32 unix timestamp
+	TypeDateTime       // stored as uint32 unix timestamp
+	TypeAggregateState // opaque binary aggregate state payload
 )
 
 // TypeInfo holds metadata about a data type.
@@ -43,7 +44,11 @@ var typeInfoList = []TypeInfo{
 	{TypeFloat64, "Float64", 8},
 	{TypeString, "String", 0},
 	{TypeDateTime, "DateTime", 4},
+	{TypeAggregateState, "AggregateState", 0},
 }
+
+// UniqStatePrefix is the marker used for serialized uniq aggregate state values.
+const UniqStatePrefix = "__goose_uniq_state__:"
 
 // TypeInfoMap maps DataType to its TypeInfo.
 var TypeInfoMap map[DataType]TypeInfo
@@ -62,7 +67,11 @@ func init() {
 
 // ParseDataType converts a type name string (case-insensitive) to DataType.
 func ParseDataType(name string) (DataType, error) {
-	dt, ok := typeNameMap[strings.ToLower(name)]
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "aggregatefunction" || strings.HasPrefix(n, "aggregatefunction(") {
+		return TypeAggregateState, nil
+	}
+	dt, ok := typeNameMap[n]
 	if !ok {
 		return 0, fmt.Errorf("unknown data type: %s", name)
 	}

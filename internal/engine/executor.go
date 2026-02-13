@@ -381,6 +381,8 @@ func convertLiteralToType(expr parser.Expression, dt types.DataType) (types.Valu
 		return f, nil
 	case types.TypeString:
 		return fmt.Sprintf("%v", lit.Value), nil
+	case types.TypeAggregateState:
+		return []byte(fmt.Sprintf("%v", lit.Value)), nil
 	case types.TypeDateTime:
 		n, err := toInt64FromLiteral(lit.Value)
 		if err != nil {

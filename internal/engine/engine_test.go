@@ -300,6 +300,77 @@ func TestNewAggregates(t *testing.T) {
 	}
 }
 
+func TestSumStateSumMergeFlow(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE src (k UInt64, v Int64) ENGINE = MergeTree() ORDER BY (k)`)
+	execSQL(t, db, `CREATE TABLE dst (k UInt64, s AggregateState) ENGINE = AggregatingMergeTree() ORDER BY (k)`)
+	execSQL(t, db, `CREATE MATERIALIZED VIEW mv_sum_state TO dst AS SELECT k, sumState(v) AS s FROM src GROUP BY k`)
+
+	execSQL(t, db, `INSERT INTO src VALUES (1, 10), (1, 5), (2, 7)`)
+	execSQL(t, db, `INSERT INTO src VALUES (1, 2), (2, 3)`)
+
+	res := execSQL(t, db, `SELECT k, sumMerge(s) AS total FROM dst GROUP BY k ORDER BY k`)
+	if len(res.Blocks) == 0 || res.Blocks[0].NumRows() != 2 {
+		t.Fatalf("expected 2 rows, got %+v", res)
+	}
+
+	block := res.Blocks[0]
+	totalCol, _ := block.GetColumn("total")
+	if got := totalCol.Value(0).(float64); got != 17 {
+		t.Fatalf("expected key=1 total 17, got %v", got)
+	}
+	if got := totalCol.Value(1).(float64); got != 10 {
+		t.Fatalf("expected key=2 total 10, got %v", got)
+	}
+}
+
+func TestUniqStateUniqMergeFlow(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE src_u (k UInt64, s String) ENGINE = MergeTree() ORDER BY (k)`)
+	execSQL(t, db, `CREATE TABLE dst_u (k UInt64, st AggregateState) ENGINE = AggregatingMergeTree() ORDER BY (k)`)
+	execSQL(t, db, `CREATE MATERIALIZED VIEW mv_uniq_state TO dst_u AS SELECT k, uniqState(s) AS st FROM src_u GROUP BY k`)
+
+	execSQL(t, db, `INSERT INTO src_u VALUES (1, 'a'), (1, 'b'), (1, 'a'), (2, 'x')`)
+	execSQL(t, db, `INSERT INTO src_u VALUES (1, 'c'), (2, 'x'), (2, 'y')`)
+
+	res := execSQL(t, db, `SELECT k, uniqMerge(st) AS u FROM dst_u GROUP BY k ORDER BY k`)
+	if len(res.Blocks) == 0 || res.Blocks[0].NumRows() != 2 {
+		t.Fatalf("expected 2 rows, got %+v", res)
+	}
+	block := res.Blocks[0]
+	uCol, _ := block.GetColumn("u")
+	if got := uCol.Value(0).(uint64); got != 3 {
+		t.Fatalf("expected key=1 uniq 3, got %d", got)
+	}
+	if got := uCol.Value(1).(uint64); got != 2 {
+		t.Fatalf("expected key=2 uniq 2, got %d", got)
+	}
+}
+
+func TestAggregateFunctionTypeSyntax(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE src_af (k UInt64, v Int64) ENGINE = MergeTree() ORDER BY (k)`)
+	execSQL(t, db, `CREATE TABLE dst_af (k UInt64, s AggregateFunction(sumState, Float64)) ENGINE = AggregatingMergeTree() ORDER BY (k)`)
+	execSQL(t, db, `CREATE MATERIALIZED VIEW mv_af TO dst_af AS SELECT k, sumState(v) AS s FROM src_af GROUP BY k`)
+	execSQL(t, db, `INSERT INTO src_af VALUES (1, 3), (1, 4), (2, 5)`)
+
+	res := execSQL(t, db, `SELECT k, sumMerge(s) AS total FROM dst_af GROUP BY k ORDER BY k`)
+	if len(res.Blocks) == 0 || res.Blocks[0].NumRows() != 2 {
+		t.Fatalf("expected 2 rows, got %+v", res)
+	}
+	block := res.Blocks[0]
+	totalCol, _ := block.GetColumn("total")
+	if got := totalCol.Value(0).(float64); got != 7 {
+		t.Fatalf("expected key=1 total 7, got %v", got)
+	}
+	if got := totalCol.Value(1).(float64); got != 5 {
+		t.Fatalf("expected key=2 total 5, got %v", got)
+	}
+}
+
 func TestPartitionByExpression(t *testing.T) {
 	db := setupTestDB(t)
 

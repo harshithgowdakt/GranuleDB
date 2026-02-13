@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/harshithgowda/goose-db/internal/aggstate"
 	"github.com/harshithgowda/goose-db/internal/column"
 	"github.com/harshithgowda/goose-db/internal/parser"
 	"github.com/harshithgowda/goose-db/internal/types"
@@ -13,7 +14,7 @@ import (
 
 // AggregateFunc describes an aggregate function to compute.
 type AggregateFunc struct {
-	Name   string // "count", "sum", "min", "max", "avg"
+	Name   string // "count", "sum", "sumState", "sumMerge", "min", "max", "avg", ...
 	ArgCol string // column name argument (empty for count(*))
 	Alias  string // output column name
 	ParamF float64
@@ -200,6 +201,10 @@ func NewAccumulator(agg AggregateFunc) Accumulator {
 		return &countAccum{}
 	case "sum":
 		return &sumAccum{}
+	case "sumstate":
+		return &sumStateAccum{}
+	case "summerge":
+		return &sumMergeAccum{}
 	case "min":
 		return &minAccum{}
 	case "max":
@@ -208,6 +213,10 @@ func NewAccumulator(agg AggregateFunc) Accumulator {
 		return &avgAccum{}
 	case "uniq":
 		return &uniqAccum{seen: make(map[string]struct{})}
+	case "uniqstate":
+		return &uniqStateAccum{hll: aggstate.NewHLL12()}
+	case "uniqmerge":
+		return &uniqMergeAccum{hll: aggstate.NewHLL12()}
 	case "quantiles":
 		q := agg.ParamF
 		if q <= 0 || q >= 1 {
@@ -241,6 +250,34 @@ func (a *sumAccum) Add(v types.Value, dt types.DataType) {
 }
 func (a *sumAccum) Result() types.Value        { return a.sum }
 func (a *sumAccum) ResultType() types.DataType { return types.TypeFloat64 }
+
+type sumStateAccum struct{ sum float64 }
+
+func (a *sumStateAccum) Add(v types.Value, dt types.DataType) {
+	f, err := types.ToFloat64(dt, v)
+	if err == nil {
+		a.sum += f
+	}
+}
+func (a *sumStateAccum) Result() types.Value        { return aggstate.EncodeSumState(a.sum) }
+func (a *sumStateAccum) ResultType() types.DataType { return types.TypeAggregateState }
+
+type sumMergeAccum struct{ sum float64 }
+
+func (a *sumMergeAccum) Add(v types.Value, dt types.DataType) {
+	if dt == types.TypeAggregateState {
+		if s, ok := aggstate.DecodeSumState(v.([]byte)); ok {
+			a.sum += s
+			return
+		}
+	}
+	f, err := types.ToFloat64(dt, v)
+	if err == nil {
+		a.sum += f
+	}
+}
+func (a *sumMergeAccum) Result() types.Value        { return a.sum }
+func (a *sumMergeAccum) ResultType() types.DataType { return types.TypeFloat64 }
 
 type minAccum struct {
 	val   float64
@@ -373,6 +410,35 @@ func (a *uniqAccum) Add(v types.Value, _ types.DataType) {
 func (a *uniqAccum) Result() types.Value        { return uint64(len(a.seen)) }
 func (a *uniqAccum) ResultType() types.DataType { return types.TypeUInt64 }
 
+type uniqStateAccum struct{ hll *aggstate.HLL12 }
+
+func (a *uniqStateAccum) Add(v types.Value, _ types.DataType) {
+	a.hll.AddBytes([]byte(fmt.Sprintf("%v", v)))
+}
+func (a *uniqStateAccum) Result() types.Value {
+	return aggstate.EncodeUniqHLLState(a.hll.MarshalBinary())
+}
+func (a *uniqStateAccum) ResultType() types.DataType { return types.TypeAggregateState }
+
+type uniqMergeAccum struct {
+	hll *aggstate.HLL12
+}
+
+func (a *uniqMergeAccum) Add(v types.Value, dt types.DataType) {
+	if dt == types.TypeAggregateState {
+		if b, ok := aggstate.DecodeUniqHLLState(v.([]byte)); ok {
+			tmp := aggstate.NewHLL12()
+			if tmp.UnmarshalBinary(b) {
+				a.hll.Merge(tmp)
+				return
+			}
+		}
+	}
+	a.hll.AddBytes([]byte(fmt.Sprintf("%v", v)))
+}
+func (a *uniqMergeAccum) Result() types.Value        { return a.hll.Estimate() }
+func (a *uniqMergeAccum) ResultType() types.DataType { return types.TypeUInt64 }
+
 type quantileAccum struct {
 	q      float64
 	values []float64
@@ -478,7 +544,7 @@ func ExtractAggregates(selectExprs []parser.SelectExpr) []AggregateFunc {
 		}
 		name := strings.ToLower(fc.Name)
 		switch name {
-		case "count", "sum", "min", "max", "avg", "uniq", "quantiles", "topk":
+		case "count", "sum", "sumstate", "summerge", "min", "max", "avg", "uniq", "uniqstate", "uniqmerge", "quantiles", "topk":
 			argCol := ""
 			paramF := float64(0)
 			paramI := int64(0)
@@ -546,7 +612,7 @@ func hasAggregateExpr(e parser.Expression) bool {
 	case *parser.FunctionCall:
 		name := strings.ToLower(expr.Name)
 		switch name {
-		case "count", "sum", "min", "max", "avg", "uniq", "quantiles", "topk":
+		case "count", "sum", "sumstate", "summerge", "min", "max", "avg", "uniq", "uniqstate", "uniqmerge", "quantiles", "topk":
 			return true
 		}
 	case *parser.BinaryExpr:

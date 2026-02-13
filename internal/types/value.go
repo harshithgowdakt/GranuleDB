@@ -1,9 +1,13 @@
 package types
 
-import "fmt"
+import (
+	"encoding/hex"
+	"fmt"
+)
 
 // Value represents a single database value. Concrete types use native Go types:
-//   UInt8 -> uint8, UInt16 -> uint16, ..., String -> string, DateTime -> uint32
+//
+//	UInt8 -> uint8, UInt16 -> uint16, ..., String -> string, DateTime -> uint32
 type Value = interface{}
 
 // ToFloat64 converts a numeric value to float64 for arithmetic.
@@ -94,6 +98,28 @@ func CompareValues(dt DataType, a, b Value) int {
 		return cmpOrdered(a.(string), b.(string))
 	case TypeDateTime:
 		return cmpOrdered(a.(uint32), b.(uint32))
+	case TypeAggregateState:
+		ab := a.([]byte)
+		bb := b.([]byte)
+		min := len(ab)
+		if len(bb) < min {
+			min = len(bb)
+		}
+		for i := 0; i < min; i++ {
+			if ab[i] < bb[i] {
+				return -1
+			}
+			if ab[i] > bb[i] {
+				return 1
+			}
+		}
+		if len(ab) < len(bb) {
+			return -1
+		}
+		if len(ab) > len(bb) {
+			return 1
+		}
+		return 0
 	default:
 		return 0
 	}
@@ -119,6 +145,9 @@ func cmpOrdered[T ordered](a, b T) int {
 func ValueToString(dt DataType, v Value) string {
 	if v == nil {
 		return "NULL"
+	}
+	if dt == TypeAggregateState {
+		return hex.EncodeToString(v.([]byte))
 	}
 	return fmt.Sprintf("%v", v)
 }

@@ -159,6 +159,24 @@ func (p *Parser) parseCreateTable() (*CreateTableStmt, error) {
 				return nil, err
 			}
 			typeName = "LowCardinality(" + innerType.Literal + ")"
+		} else if strings.ToLower(typeName) == "aggregatefunction" {
+			// Consume AggregateFunction(...) and keep normalized type marker.
+			if _, err := p.expect(TokenLParen); err != nil {
+				return nil, err
+			}
+			depth := 1
+			for depth > 0 {
+				tok := p.advance()
+				if tok.Type == TokenEOF {
+					return nil, p.errorf("unterminated AggregateFunction type")
+				}
+				if tok.Type == TokenLParen {
+					depth++
+				} else if tok.Type == TokenRParen {
+					depth--
+				}
+			}
+			typeName = "AggregateFunction"
 		}
 		stmt.Columns = append(stmt.Columns, ColumnDefNode{
 			Name:     colName.Literal,

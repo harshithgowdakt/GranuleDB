@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/harshithgowda/goose-db/internal/aggstate"
 	"github.com/harshithgowda/goose-db/internal/column"
 	"github.com/harshithgowda/goose-db/internal/compression"
 	"github.com/harshithgowda/goose-db/internal/storage"
@@ -145,6 +146,13 @@ func collapseAggregatingRows(block *column.Block, orderBy []string) *column.Bloc
 			dt := c.DataType()
 
 			if keySet[name] || !dt.IsNumeric() {
+				if !keySet[name] && dt == types.TypeAggregateState {
+					merged, ok := mergeAggregateStates(c, start, end)
+					if ok {
+						outCols[cIdx].Append(merged)
+						continue
+					}
+				}
 				outCols[cIdx].Append(c.Value(start))
 				continue
 			}
@@ -206,4 +214,50 @@ func collapseAggregatingRows(block *column.Block, orderBy []string) *column.Bloc
 	}
 
 	return column.NewBlock(block.ColumnNames, outCols)
+}
+
+func mergeAggregateStates(col column.Column, start, end int) ([]byte, bool) {
+	first, ok := col.Value(start).([]byte)
+	if !ok {
+		return nil, false
+	}
+	kind := aggstate.StateKind(first)
+	if kind == aggstate.KindUnknown {
+		return nil, false
+	}
+
+	acc := make([]byte, len(first))
+	copy(acc, first)
+
+	for r := start + 1; r < end; r++ {
+		cur, ok := col.Value(r).([]byte)
+		if !ok || aggstate.StateKind(cur) != kind {
+			return nil, false
+		}
+		switch kind {
+		case aggstate.KindSum:
+			a, okA := aggstate.DecodeSumState(acc)
+			b, okB := aggstate.DecodeSumState(cur)
+			if !okA || !okB {
+				return nil, false
+			}
+			acc = aggstate.EncodeSumState(a + b)
+		case aggstate.KindUniqHLL:
+			ab, okA := aggstate.DecodeUniqHLLState(acc)
+			bb, okB := aggstate.DecodeUniqHLLState(cur)
+			if !okA || !okB {
+				return nil, false
+			}
+			ah := aggstate.NewHLL12()
+			bh := aggstate.NewHLL12()
+			if !ah.UnmarshalBinary(ab) || !bh.UnmarshalBinary(bb) {
+				return nil, false
+			}
+			ah.Merge(bh)
+			acc = aggstate.EncodeUniqHLLState(ah.MarshalBinary())
+		default:
+			return nil, false
+		}
+	}
+	return acc, true
 }

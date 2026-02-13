@@ -13,7 +13,7 @@ import (
 // isAggregateFunc returns true for aggregate function names.
 func isAggregateFunc(name string) bool {
 	switch strings.ToLower(name) {
-	case "count", "sum", "min", "max", "avg", "uniq", "quantiles", "topk":
+	case "count", "sum", "sumstate", "summerge", "min", "max", "avg", "uniq", "uniqstate", "uniqmerge", "quantiles", "topk":
 		return true
 	}
 	return false

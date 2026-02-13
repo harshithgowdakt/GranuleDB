@@ -114,6 +114,17 @@ func encodeColumnTo(w io.Writer, col Column) error {
 			}
 		}
 		return nil
+	case *AggregateStateColumn:
+		for i := 0; i < n; i++ {
+			b := c.Data[i]
+			if err := WriteVarUInt(w, uint64(len(b))); err != nil {
+				return err
+			}
+			if _, err := w.Write(b); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *DateTimeColumn:
 		for i := 0; i < n; i++ {
 			if err := binary.Write(w, binary.LittleEndian, c.Data[i]); err != nil {
@@ -231,6 +242,24 @@ func decodeColumnFrom(dt types.DataType, r io.Reader, numRows int) (Column, erro
 			col.Data = append(col.Data, string(buf))
 		}
 		return col, nil
+	case types.TypeAggregateState:
+		col := &AggregateStateColumn{Data: make([][]byte, 0, numRows)}
+		br, ok := r.(io.ByteReader)
+		if !ok {
+			br = newByteReaderWrapper(r)
+		}
+		for i := 0; i < numRows; i++ {
+			length, err := ReadVarUInt(br)
+			if err != nil {
+				return nil, fmt.Errorf("reading aggregate state length at row %d: %w", i, err)
+			}
+			buf := make([]byte, length)
+			if _, err := io.ReadFull(r, buf); err != nil {
+				return nil, fmt.Errorf("reading aggregate state data at row %d: %w", i, err)
+			}
+			col.Data = append(col.Data, buf)
+		}
+		return col, nil
 	case types.TypeDateTime:
 		col := &DateTimeColumn{Data: make([]uint32, numRows)}
 		for i := 0; i < numRows; i++ {
@@ -273,6 +302,13 @@ func EncodeValue(w io.Writer, dt types.DataType, v types.Value) error {
 			return err
 		}
 		_, err := w.Write([]byte(s))
+		return err
+	case types.TypeAggregateState:
+		b := v.([]byte)
+		if err := WriteVarUInt(w, uint64(len(b))); err != nil {
+			return err
+		}
+		_, err := w.Write(b)
 		return err
 	case types.TypeDateTime:
 		return binary.Write(w, binary.LittleEndian, v.(uint32))
@@ -338,6 +374,20 @@ func DecodeValue(r io.Reader, dt types.DataType) (types.Value, error) {
 			return nil, err
 		}
 		return string(buf), nil
+	case types.TypeAggregateState:
+		br, ok := r.(io.ByteReader)
+		if !ok {
+			br = newByteReaderWrapper(r)
+		}
+		length, err := ReadVarUInt(br)
+		if err != nil {
+			return nil, err
+		}
+		buf := make([]byte, length)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil, err
+		}
+		return buf, nil
 	case types.TypeDateTime:
 		var v uint32
 		err := binary.Read(r, binary.LittleEndian, &v)

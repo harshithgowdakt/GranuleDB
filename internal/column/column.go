@@ -46,6 +46,8 @@ func NewColumnWithCapacity(dt types.DataType, n int) Column {
 		return &StringColumn{Data: make([]string, 0, n)}
 	case types.TypeDateTime:
 		return &DateTimeColumn{Data: make([]uint32, 0, n)}
+	case types.TypeAggregateState:
+		return &AggregateStateColumn{Data: make([][]byte, 0, n)}
 	default:
 		panic("unsupported data type")
 	}
@@ -277,4 +279,36 @@ func (c *DateTimeColumn) Clone() Column {
 	d := make([]uint32, len(c.Data))
 	copy(d, c.Data)
 	return &DateTimeColumn{Data: d}
+}
+
+// --- AggregateStateColumn ---
+
+type AggregateStateColumn struct{ Data [][]byte }
+
+func (c *AggregateStateColumn) DataType() types.DataType { return types.TypeAggregateState }
+func (c *AggregateStateColumn) Len() int                 { return len(c.Data) }
+func (c *AggregateStateColumn) Value(i int) types.Value  { return c.Data[i] }
+func (c *AggregateStateColumn) Append(v types.Value) {
+	b := v.([]byte)
+	cp := make([]byte, len(b))
+	copy(cp, b)
+	c.Data = append(c.Data, cp)
+}
+func (c *AggregateStateColumn) Slice(from, to int) Column {
+	d := make([][]byte, to-from)
+	for i := from; i < to; i++ {
+		cp := make([]byte, len(c.Data[i]))
+		copy(cp, c.Data[i])
+		d[i-from] = cp
+	}
+	return &AggregateStateColumn{Data: d}
+}
+func (c *AggregateStateColumn) Clone() Column {
+	d := make([][]byte, len(c.Data))
+	for i := range c.Data {
+		cp := make([]byte, len(c.Data[i]))
+		copy(cp, c.Data[i])
+		d[i] = cp
+	}
+	return &AggregateStateColumn{Data: d}
 }

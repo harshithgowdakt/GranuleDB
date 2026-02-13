@@ -28,6 +28,8 @@ func FilterByMask(col Column, mask []bool) Column {
 		return &StringColumn{Data: filterSlice(c.Data, mask)}
 	case *DateTimeColumn:
 		return &DateTimeColumn{Data: filterSlice(c.Data, mask)}
+	case *AggregateStateColumn:
+		return &AggregateStateColumn{Data: filterSlice(c.Data, mask)}
 	case *LowCardinalityColumn:
 		return &LowCardinalityColumn{
 			Dict:    c.Dict,
@@ -66,6 +68,8 @@ func Gather(col Column, indices []int) Column {
 		return &StringColumn{Data: gatherSlice(c.Data, indices)}
 	case *DateTimeColumn:
 		return &DateTimeColumn{Data: gatherSlice(c.Data, indices)}
+	case *AggregateStateColumn:
+		return &AggregateStateColumn{Data: gatherSlice(c.Data, indices)}
 	case *LowCardinalityColumn:
 		return &LowCardinalityColumn{
 			Dict:    c.Dict,
@@ -104,6 +108,8 @@ func AppendColumn(dst, src Column) {
 		d.Data = appendSlice(d.Data, src.(*StringColumn).Data)
 	case *DateTimeColumn:
 		d.Data = appendSlice(d.Data, src.(*DateTimeColumn).Data)
+	case *AggregateStateColumn:
+		d.Data = appendSlice(d.Data, src.(*AggregateStateColumn).Data)
 	case *LowCardinalityColumn:
 		s := src.(*LowCardinalityColumn)
 		appendLCColumn(d, s)

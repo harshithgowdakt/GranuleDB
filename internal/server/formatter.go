@@ -87,9 +87,9 @@ func formatCSV(w io.Writer, blocks []*column.Block, colNames []string) error {
 
 func formatJSON(w io.Writer, blocks []*column.Block, colNames []string) error {
 	type resultJSON struct {
-		Meta []map[string]string   `json:"meta"`
+		Meta []map[string]string      `json:"meta"`
 		Data []map[string]interface{} `json:"data"`
-		Rows int                    `json:"rows"`
+		Rows int                      `json:"rows"`
 	}
 
 	result := resultJSON{}
@@ -136,6 +136,8 @@ func formatValue(dt types.DataType, v types.Value) string {
 		return fmt.Sprintf("%g", v.(float32))
 	case types.TypeFloat64:
 		return fmt.Sprintf("%g", v.(float64))
+	case types.TypeAggregateState:
+		return types.ValueToString(dt, v)
 	default:
 		return fmt.Sprintf("%v", v)
 	}
