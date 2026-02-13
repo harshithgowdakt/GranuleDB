@@ -2,6 +2,7 @@ package merge
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/harshithgowda/goose-db/internal/column"
 	"github.com/harshithgowda/goose-db/internal/compression"
@@ -114,5 +115,95 @@ func kWayMerge(blocks []*column.Block, orderBy []string, schema *storage.TableSc
 
 	// Sort by ORDER BY columns
 	result.SortByColumns(orderBy)
+
+	if strings.EqualFold(schema.Engine, "AggregatingMergeTree") {
+		result = collapseAggregatingRows(result, orderBy)
+	}
 	return result
+}
+
+// collapseAggregatingRows merges rows with the same ORDER BY key.
+// For non-key numeric columns, it sums values; for non-numeric columns, it keeps first value.
+func collapseAggregatingRows(block *column.Block, orderBy []string) *column.Block {
+	if block == nil || block.NumRows() <= 1 || len(orderBy) == 0 {
+		return block
+	}
+
+	keySet := make(map[string]bool, len(orderBy))
+	for _, k := range orderBy {
+		keySet[k] = true
+	}
+
+	outCols := make([]column.Column, len(block.Columns))
+	for i, c := range block.Columns {
+		outCols[i] = column.NewColumnWithCapacity(c.DataType(), block.NumRows())
+	}
+
+	appendRange := func(start, end int) {
+		for cIdx, c := range block.Columns {
+			name := block.ColumnNames[cIdx]
+			dt := c.DataType()
+
+			if keySet[name] || !dt.IsNumeric() {
+				outCols[cIdx].Append(c.Value(start))
+				continue
+			}
+
+			sumF := float64(0)
+			for r := start; r < end; r++ {
+				f, err := types.ToFloat64(dt, c.Value(r))
+				if err == nil {
+					sumF += f
+				}
+			}
+			switch dt {
+			case types.TypeUInt8:
+				outCols[cIdx].Append(uint8(sumF))
+			case types.TypeUInt16:
+				outCols[cIdx].Append(uint16(sumF))
+			case types.TypeUInt32:
+				outCols[cIdx].Append(uint32(sumF))
+			case types.TypeUInt64:
+				outCols[cIdx].Append(uint64(sumF))
+			case types.TypeInt8:
+				outCols[cIdx].Append(int8(sumF))
+			case types.TypeInt16:
+				outCols[cIdx].Append(int16(sumF))
+			case types.TypeInt32:
+				outCols[cIdx].Append(int32(sumF))
+			case types.TypeInt64:
+				outCols[cIdx].Append(int64(sumF))
+			case types.TypeFloat32:
+				outCols[cIdx].Append(float32(sumF))
+			case types.TypeFloat64:
+				outCols[cIdx].Append(sumF)
+			case types.TypeDateTime:
+				outCols[cIdx].Append(uint32(sumF))
+			default:
+				outCols[cIdx].Append(c.Value(start))
+			}
+		}
+	}
+
+	groupStart := 0
+	for row := 1; row <= block.NumRows(); row++ {
+		sameKey := false
+		if row < block.NumRows() {
+			sameKey = true
+			for _, k := range orderBy {
+				col, _ := block.GetColumn(k)
+				if types.CompareValues(col.DataType(), col.Value(groupStart), col.Value(row)) != 0 {
+					sameKey = false
+					break
+				}
+			}
+		}
+		if sameKey {
+			continue
+		}
+		appendRange(groupStart, row)
+		groupStart = row
+	}
+
+	return column.NewBlock(block.ColumnNames, outCols)
 }

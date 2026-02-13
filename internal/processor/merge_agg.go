@@ -73,7 +73,7 @@ func (m *MergeAggregateProcessor) Prepare() Status {
 			if len(m.groupBy) == 0 && len(m.groups) == 0 {
 				accums := make([]engine.Accumulator, len(m.aggregates))
 				for j, agg := range m.aggregates {
-					accums[j] = engine.NewAccumulator(agg.Name)
+					accums[j] = engine.NewAccumulator(agg)
 				}
 				m.groups[""] = &mergeGroupState{keys: nil, accums: accums}
 				m.groupOrder = append(m.groupOrder, "")
@@ -187,7 +187,7 @@ func (m *MergeAggregateProcessor) mergeBlock(block *column.Block) {
 		if !ok {
 			accums := make([]engine.Accumulator, len(m.aggregates))
 			for j, agg := range m.aggregates {
-				accums[j] = engine.NewAccumulator(agg.Name)
+				accums[j] = engine.NewAccumulator(agg)
 			}
 			gs = &mergeGroupState{keys: keyParts, accums: accums}
 			m.groups[keyStr] = gs

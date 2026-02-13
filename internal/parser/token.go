@@ -6,8 +6,8 @@ type TokenType int
 const (
 	// Literals
 	TokenIdentifier TokenType = iota
-	TokenNumber     // integer or float literal
-	TokenString     // 'single-quoted string'
+	TokenNumber               // integer or float literal
+	TokenString               // 'single-quoted string'
 
 	// Keywords
 	TokenSELECT
@@ -23,9 +23,12 @@ const (
 	TokenVALUES
 	TokenCREATE
 	TokenTABLE
+	TokenVIEW
 	TokenENGINE
 	TokenMergeTree
+	TokenMATERIALIZED
 	TokenPARTITION
+	TokenTO
 	TokenAS
 	TokenAND
 	TokenOR
@@ -41,20 +44,20 @@ const (
 	TokenEXISTS
 
 	// Operators and punctuation
-	TokenLParen // (
-	TokenRParen // )
-	TokenComma  // ,
-	TokenStar   // *
-	TokenEQ     // =
-	TokenNEQ    // != or <>
-	TokenLT     // <
-	TokenGT     // >
-	TokenLTE    // <=
-	TokenGTE    // >=
-	TokenPlus   // +
-	TokenMinus  // -
-	TokenSlash  // /
-	TokenDot    // .
+	TokenLParen    // (
+	TokenRParen    // )
+	TokenComma     // ,
+	TokenStar      // *
+	TokenEQ        // =
+	TokenNEQ       // != or <>
+	TokenLT        // <
+	TokenGT        // >
+	TokenLTE       // <=
+	TokenGTE       // >=
+	TokenPlus      // +
+	TokenMinus     // -
+	TokenSlash     // /
+	TokenDot       // .
 	TokenSemicolon // ;
 
 	TokenEOF
@@ -69,35 +72,38 @@ type Token struct {
 }
 
 var keywords = map[string]TokenType{
-	"SELECT":    TokenSELECT,
-	"FROM":      TokenFROM,
-	"WHERE":     TokenWHERE,
-	"ORDER":     TokenORDER,
-	"BY":        TokenBY,
-	"LIMIT":     TokenLIMIT,
-	"GROUP":     TokenGROUP,
-	"HAVING":    TokenHAVING,
-	"INSERT":    TokenINSERT,
-	"INTO":      TokenINTO,
-	"VALUES":    TokenVALUES,
-	"CREATE":    TokenCREATE,
-	"TABLE":     TokenTABLE,
-	"ENGINE":    TokenENGINE,
-	"MERGETREE": TokenMergeTree,
-	"PARTITION": TokenPARTITION,
-	"AS":        TokenAS,
-	"AND":       TokenAND,
-	"OR":        TokenOR,
-	"NOT":       TokenNOT,
-	"IN":        TokenIN,
-	"BETWEEN":   TokenBETWEEN,
-	"ASC":       TokenASC,
-	"DESC":      TokenDESC,
-	"DROP":      TokenDROP,
-	"SHOW":      TokenSHOW,
-	"TABLES":    TokenTABLES,
-	"IF":        TokenIF,
-	"EXISTS":    TokenEXISTS,
+	"SELECT":       TokenSELECT,
+	"FROM":         TokenFROM,
+	"WHERE":        TokenWHERE,
+	"ORDER":        TokenORDER,
+	"BY":           TokenBY,
+	"LIMIT":        TokenLIMIT,
+	"GROUP":        TokenGROUP,
+	"HAVING":       TokenHAVING,
+	"INSERT":       TokenINSERT,
+	"INTO":         TokenINTO,
+	"VALUES":       TokenVALUES,
+	"CREATE":       TokenCREATE,
+	"TABLE":        TokenTABLE,
+	"VIEW":         TokenVIEW,
+	"ENGINE":       TokenENGINE,
+	"MERGETREE":    TokenMergeTree,
+	"MATERIALIZED": TokenMATERIALIZED,
+	"PARTITION":    TokenPARTITION,
+	"TO":           TokenTO,
+	"AS":           TokenAS,
+	"AND":          TokenAND,
+	"OR":           TokenOR,
+	"NOT":          TokenNOT,
+	"IN":           TokenIN,
+	"BETWEEN":      TokenBETWEEN,
+	"ASC":          TokenASC,
+	"DESC":         TokenDESC,
+	"DROP":         TokenDROP,
+	"SHOW":         TokenSHOW,
+	"TABLES":       TokenTABLES,
+	"IF":           TokenIF,
+	"EXISTS":       TokenEXISTS,
 }
 
 // LookupKeyword returns the keyword token type for an identifier, or TokenIdentifier.

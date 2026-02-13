@@ -18,12 +18,22 @@ type CreateTableStmt struct {
 	TableName   string
 	IfNotExists bool
 	Columns     []ColumnDefNode
-	Engine      string   // "MergeTree"
-	OrderBy     []string // primary key columns
+	Engine      string     // "MergeTree", "AggregatingMergeTree", etc.
+	OrderBy     []string   // primary key columns
 	PartitionBy Expression // partition expression, or nil if not specified
 }
 
 func (*CreateTableStmt) statementNode() {}
+
+// CreateMaterializedViewStmt represents CREATE MATERIALIZED VIEW ... TO ... AS SELECT ...
+type CreateMaterializedViewStmt struct {
+	ViewName    string
+	IfNotExists bool
+	TargetTable string
+	Select      *SelectStmt
+}
+
+func (*CreateMaterializedViewStmt) statementNode() {}
 
 // ColumnDefNode defines a column in a CREATE TABLE.
 type ColumnDefNode struct {

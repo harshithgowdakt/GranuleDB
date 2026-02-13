@@ -22,7 +22,7 @@ func (p *Parser) Parse() (Statement, error) {
 	tok := p.peek()
 	switch tok.Type {
 	case TokenCREATE:
-		return p.parseCreateTable()
+		return p.parseCreate()
 	case TokenINSERT:
 		return p.parseInsert()
 	case TokenSELECT:
@@ -34,6 +34,15 @@ func (p *Parser) Parse() (Statement, error) {
 	default:
 		return nil, p.errorf("unexpected token %q, expected a statement", tok.Literal)
 	}
+}
+
+func (p *Parser) parseCreate() (Statement, error) {
+	// CREATE MATERIALIZED VIEW ...
+	if p.peekAt(p.pos+1).Type == TokenMATERIALIZED {
+		return p.parseCreateMaterializedView()
+	}
+	// CREATE TABLE ...
+	return p.parseCreateTable()
 }
 
 // ParseSQL is a convenience function: lex + parse a SQL string.
@@ -205,6 +214,59 @@ func (p *Parser) parseCreateTable() (*CreateTableStmt, error) {
 		}
 		stmt.PartitionBy = expr
 	}
+
+	return stmt, nil
+}
+
+func (p *Parser) parseCreateMaterializedView() (*CreateMaterializedViewStmt, error) {
+	if err := p.expectKeyword(TokenCREATE); err != nil {
+		return nil, err
+	}
+	if err := p.expectKeyword(TokenMATERIALIZED); err != nil {
+		return nil, err
+	}
+	if err := p.expectKeyword(TokenVIEW); err != nil {
+		return nil, err
+	}
+
+	stmt := &CreateMaterializedViewStmt{}
+
+	// Optional IF NOT EXISTS.
+	if p.peek().Type == TokenIF {
+		p.advance()
+		if err := p.expectKeyword(TokenNOT); err != nil {
+			return nil, err
+		}
+		if err := p.expectKeyword(TokenEXISTS); err != nil {
+			return nil, err
+		}
+		stmt.IfNotExists = true
+	}
+
+	nameTok, err := p.expect(TokenIdentifier)
+	if err != nil {
+		return nil, err
+	}
+	stmt.ViewName = nameTok.Literal
+
+	if err := p.expectKeyword(TokenTO); err != nil {
+		return nil, err
+	}
+	targetTok, err := p.expect(TokenIdentifier)
+	if err != nil {
+		return nil, err
+	}
+	stmt.TargetTable = targetTok.Literal
+
+	if err := p.expectKeyword(TokenAS); err != nil {
+		return nil, err
+	}
+
+	selectStmt, err := p.parseSelect()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Select = selectStmt
 
 	return stmt, nil
 }

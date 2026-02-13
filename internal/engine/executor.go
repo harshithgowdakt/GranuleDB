@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/harshithgowda/goose-db/internal/column"
 	"github.com/harshithgowda/goose-db/internal/parser"
@@ -19,9 +20,9 @@ var SelectExecutor func(stmt *parser.SelectStmt, db *storage.Database) (*Execute
 
 // ExecuteResult holds the result of executing a statement.
 type ExecuteResult struct {
-	Blocks     []*column.Block
+	Blocks      []*column.Block
 	ColumnNames []string
-	Message    string // for DDL statements
+	Message     string // for DDL statements
 }
 
 // Execute runs a parsed statement against the database.
@@ -29,6 +30,8 @@ func Execute(stmt parser.Statement, db *storage.Database) (*ExecuteResult, error
 	switch s := stmt.(type) {
 	case *parser.CreateTableStmt:
 		return executeCreate(s, db)
+	case *parser.CreateMaterializedViewStmt:
+		return executeCreateMaterializedView(s, db)
 	case *parser.InsertStmt:
 		return executeInsert(s, db)
 	case *parser.SelectStmt:
@@ -44,8 +47,12 @@ func Execute(stmt parser.Statement, db *storage.Database) (*ExecuteResult, error
 
 func executeCreate(stmt *parser.CreateTableStmt, db *storage.Database) (*ExecuteResult, error) {
 	schema := storage.TableSchema{
+		Engine:      stmt.Engine,
 		OrderBy:     stmt.OrderBy,
 		PartitionBy: parser.ExprToSQL(stmt.PartitionBy),
+	}
+	if schema.Engine == "" {
+		schema.Engine = "MergeTree"
 	}
 
 	for _, col := range stmt.Columns {
@@ -59,6 +66,25 @@ func executeCreate(stmt *parser.CreateTableStmt, db *storage.Database) (*Execute
 	err := db.CreateTable(stmt.TableName, schema)
 	if err != nil {
 		if stmt.IfNotExists {
+			return &ExecuteResult{Message: "OK"}, nil
+		}
+		return nil, err
+	}
+	return &ExecuteResult{Message: "OK"}, nil
+}
+
+func executeCreateMaterializedView(stmt *parser.CreateMaterializedViewStmt, db *storage.Database) (*ExecuteResult, error) {
+	if stmt.Select == nil {
+		return nil, fmt.Errorf("materialized view requires AS SELECT query")
+	}
+	mv := storage.MaterializedView{
+		Name:        stmt.ViewName,
+		SourceTable: stmt.Select.From,
+		TargetTable: stmt.TargetTable,
+		SelectSQL:   parser.SelectToSQL(stmt.Select),
+	}
+	if err := db.CreateMaterializedView(mv); err != nil {
+		if stmt.IfNotExists && strings.Contains(err.Error(), "already exists") {
 			return &ExecuteResult{Message: "OK"}, nil
 		}
 		return nil, err
@@ -119,6 +145,10 @@ func executeInsert(stmt *parser.InsertStmt, db *storage.Database) (*ExecuteResul
 		return nil, err
 	}
 	if err := table.InsertPartitioned(partitions); err != nil {
+		return nil, err
+	}
+
+	if err := applyMaterializedViews(stmt.TableName, block, db); err != nil {
 		return nil, err
 	}
 
@@ -227,6 +257,50 @@ func executeShowTables(db *storage.Database) (*ExecuteResult, error) {
 		Blocks:      []*column.Block{block},
 		ColumnNames: []string{"name"},
 	}, nil
+}
+
+func applyMaterializedViews(sourceTable string, inserted *column.Block, db *storage.Database) error {
+	views := db.MaterializedViewsForSource(sourceTable)
+	for _, mv := range views {
+		stmt, err := parser.ParseSQL(mv.SelectSQL)
+		if err != nil {
+			return fmt.Errorf("materialized view %s parse error: %w", mv.Name, err)
+		}
+		selectStmt, ok := stmt.(*parser.SelectStmt)
+		if !ok {
+			return fmt.Errorf("materialized view %s is not a SELECT", mv.Name)
+		}
+
+		outBlock, outNames, err := executeSelectOnBlock(selectStmt, inserted)
+		if err != nil {
+			return fmt.Errorf("materialized view %s execution error: %w", mv.Name, err)
+		}
+		if outBlock == nil || outBlock.NumRows() == 0 {
+			continue
+		}
+		if len(outNames) > 0 {
+			outBlock.ColumnNames = outNames
+		}
+
+		target, ok := db.GetTable(mv.TargetTable)
+		if !ok {
+			return fmt.Errorf("materialized view %s target table %s not found", mv.Name, mv.TargetTable)
+		}
+
+		reordered, err := reorderBlockToSchema(outBlock, target.Schema.ColumnNames())
+		if err != nil {
+			return fmt.Errorf("materialized view %s output mismatch: %w", mv.Name, err)
+		}
+
+		partitions, err := computePartitions(reordered, target.Schema.PartitionBy)
+		if err != nil {
+			return err
+		}
+		if err := target.InsertPartitioned(partitions); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // convertLiteralToType converts a parser expression (literal) to a typed value.

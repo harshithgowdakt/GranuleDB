@@ -251,6 +251,55 @@ func TestAllDataTypes(t *testing.T) {
 	}
 }
 
+func TestMaterializedViewInsertTrigger(t *testing.T) {
+	db := setupTestDB(t)
+
+	execSQL(t, db, `CREATE TABLE events (user_id UInt64, amount Int64) ENGINE = MergeTree() ORDER BY (user_id)`)
+	execSQL(t, db, `CREATE TABLE user_totals (user_id UInt64, total Float64) ENGINE = AggregatingMergeTree() ORDER BY (user_id)`)
+	execSQL(t, db, `CREATE MATERIALIZED VIEW mv_user_totals TO user_totals AS SELECT user_id, sum(amount) AS total FROM events GROUP BY user_id`)
+
+	execSQL(t, db, `INSERT INTO events VALUES (1, 10), (1, 5), (2, 7)`)
+	execSQL(t, db, `INSERT INTO events VALUES (1, 2), (2, 3)`)
+
+	// Before background merge, AggregatingMergeTree may still have multiple rows per key.
+	result := execSQL(t, db, `SELECT user_id, sum(total) AS total FROM user_totals GROUP BY user_id ORDER BY user_id`)
+	if len(result.Blocks) == 0 || result.Blocks[0].NumRows() != 2 {
+		t.Fatalf("expected 2 aggregated rows, got %+v", result)
+	}
+	block := result.Blocks[0]
+	totalCol, _ := block.GetColumn("total")
+	if got := totalCol.Value(0).(float64); got != 17 {
+		t.Fatalf("expected user 1 total 17, got %v", got)
+	}
+	if got := totalCol.Value(1).(float64); got != 10 {
+		t.Fatalf("expected user 2 total 10, got %v", got)
+	}
+}
+
+func TestNewAggregates(t *testing.T) {
+	db := setupTestDB(t)
+	execSQL(t, db, `CREATE TABLE t (k UInt64, v Int64, s String) ENGINE = MergeTree() ORDER BY (k)`)
+	execSQL(t, db, `INSERT INTO t VALUES (1, 10, 'a'), (2, 20, 'b'), (3, 30, 'a'), (4, 40, 'c'), (5, 50, 'a')`)
+
+	res := execSQL(t, db, `SELECT uniq(s) AS u FROM t`)
+	if len(res.Blocks) == 0 || res.Blocks[0].NumRows() != 1 {
+		t.Fatal("expected single row for uniq")
+	}
+	if got := res.Blocks[0].Columns[0].Value(0).(uint64); got != 3 {
+		t.Fatalf("expected uniq=3, got %d", got)
+	}
+
+	res = execSQL(t, db, `SELECT quantiles(0.5, v) AS q FROM t`)
+	if got := res.Blocks[0].Columns[0].Value(0).(float64); got != 30 {
+		t.Fatalf("expected quantile 30, got %v", got)
+	}
+
+	res = execSQL(t, db, `SELECT topK(2, s) AS t FROM t`)
+	if got := res.Blocks[0].Columns[0].Value(0).(string); got != "a,b" {
+		t.Fatalf("expected topK \"a,b\", got %q", got)
+	}
+}
+
 func TestPartitionByExpression(t *testing.T) {
 	db := setupTestDB(t)
 

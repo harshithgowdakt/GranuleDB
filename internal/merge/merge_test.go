@@ -113,3 +113,73 @@ func TestMergeSelector(t *testing.T) {
 		t.Fatalf("expected at least 3 parts to merge, got %d", len(result))
 	}
 }
+
+func TestAggregatingMergeTreeCollapse(t *testing.T) {
+	dir, err := os.MkdirTemp("", "goosedb-agg-merge-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	schema := &storage.TableSchema{
+		Engine: "AggregatingMergeTree",
+		Columns: []storage.ColumnDef{
+			{Name: "k", DataType: types.TypeUInt64},
+			{Name: "v", DataType: types.TypeInt64},
+		},
+		OrderBy: []string{"k"},
+	}
+
+	codec := &compression.LZ4Codec{}
+	writer := storage.NewPartWriter(schema, dir, codec)
+
+	part1, err := writer.WritePart(
+		column.NewBlock(
+			[]string{"k", "v"},
+			[]column.Column{
+				&column.UInt64Column{Data: []uint64{1, 2}},
+				&column.Int64Column{Data: []int64{10, 20}},
+			},
+		),
+		storage.PartInfo{PartitionID: "all", MinBlock: 1, MaxBlock: 1, Level: 0},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part2, err := writer.WritePart(
+		column.NewBlock(
+			[]string{"k", "v"},
+			[]column.Column{
+				&column.UInt64Column{Data: []uint64{1, 2}},
+				&column.Int64Column{Data: []int64{5, 7}},
+			},
+		),
+		storage.PartInfo{PartitionID: "all", MinBlock: 2, MaxBlock: 2, Level: 0},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	executor := merge.NewMergeExecutor(schema, codec)
+	merged, err := executor.Merge(dir, []*storage.Part{part1, part2})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reader := storage.NewPartReader(merged, schema)
+	block, err := reader.ReadAll([]string{"k", "v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if block.NumRows() != 2 {
+		t.Fatalf("expected 2 rows after aggregating collapse, got %d", block.NumRows())
+	}
+	vCol, _ := block.GetColumn("v")
+	if got := vCol.Value(0).(int64); got != 15 {
+		t.Fatalf("expected first aggregated value 15, got %d", got)
+	}
+	if got := vCol.Value(1).(int64); got != 27 {
+		t.Fatalf("expected second aggregated value 27, got %d", got)
+	}
+}

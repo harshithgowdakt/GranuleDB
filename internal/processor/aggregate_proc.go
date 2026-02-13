@@ -48,7 +48,7 @@ func (a *AggregateProcessor) Prepare() Status {
 			if len(a.groupBy) == 0 && len(a.groups) == 0 {
 				accums := make([]engine.Accumulator, len(a.aggregates))
 				for j, agg := range a.aggregates {
-					accums[j] = engine.NewAccumulator(agg.Name)
+					accums[j] = engine.NewAccumulator(agg)
 				}
 				a.groups[""] = &aggGroupState{keys: nil, accums: accums}
 				a.groupOrder = append(a.groupOrder, "")
@@ -137,7 +137,7 @@ func (a *AggregateProcessor) Work() {
 			if !ok {
 				accums := make([]engine.Accumulator, len(a.aggregates))
 				for j, agg := range a.aggregates {
-					accums[j] = engine.NewAccumulator(agg.Name)
+					accums[j] = engine.NewAccumulator(agg)
 				}
 				gs = &aggGroupState{keys: keyParts, accums: accums}
 				a.groups[keyStr] = gs

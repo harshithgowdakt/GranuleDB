@@ -14,9 +14,11 @@ import (
 
 // Database manages all tables and the base data directory.
 type Database struct {
-	DataDir string
-	tables  map[string]*MergeTreeTable
-	mu      sync.RWMutex
+	DataDir        string
+	tables         map[string]*MergeTreeTable
+	mviewsBySource map[string][]MaterializedView
+	mviewsByName   map[string]MaterializedView
+	mu             sync.RWMutex
 }
 
 // NewDatabase creates a new database rooted at dataDir.
@@ -25,8 +27,10 @@ func NewDatabase(dataDir string) (*Database, error) {
 		return nil, fmt.Errorf("creating data dir: %w", err)
 	}
 	db := &Database{
-		DataDir: dataDir,
-		tables:  make(map[string]*MergeTreeTable),
+		DataDir:        dataDir,
+		tables:         make(map[string]*MergeTreeTable),
+		mviewsBySource: make(map[string][]MaterializedView),
+		mviewsByName:   make(map[string]MaterializedView),
 	}
 	if err := db.LoadMetadata(); err != nil {
 		return nil, fmt.Errorf("loading metadata: %w", err)
@@ -206,22 +210,24 @@ func parsePartDirName(name string) (*PartInfo, error) {
 
 // tableSchemaJSON is the JSON representation of a table schema saved to disk.
 type tableSchemaJSON struct {
-	Name    string            `json:"name"`
-	Columns []columnSchemaJSON `json:"columns"`
-	OrderBy     []string `json:"order_by"`
-	PartitionBy string   `json:"partition_by,omitempty"`
-	GranuleSize int      `json:"granule_size"`
+	Name        string             `json:"name"`
+	Columns     []columnSchemaJSON `json:"columns"`
+	Engine      string             `json:"engine,omitempty"`
+	OrderBy     []string           `json:"order_by"`
+	PartitionBy string             `json:"partition_by,omitempty"`
+	GranuleSize int                `json:"granule_size"`
 }
 
 type columnSchemaJSON struct {
-	Name            string `json:"name"`
-	DataType        string `json:"data_type"`
-	LowCardinality  bool   `json:"low_cardinality,omitempty"`
+	Name           string `json:"name"`
+	DataType       string `json:"data_type"`
+	LowCardinality bool   `json:"low_cardinality,omitempty"`
 }
 
 func saveTableSchema(tableDir, name string, schema *TableSchema) error {
 	j := tableSchemaJSON{
 		Name:        name,
+		Engine:      schema.Engine,
 		OrderBy:     schema.OrderBy,
 		PartitionBy: schema.PartitionBy,
 		GranuleSize: schema.EffectiveGranuleSize(),
@@ -250,9 +256,13 @@ func loadTableSchema(tableDir string) (*TableSchema, error) {
 		return nil, err
 	}
 	schema := &TableSchema{
+		Engine:      j.Engine,
 		OrderBy:     j.OrderBy,
 		PartitionBy: j.PartitionBy,
 		GranuleSize: j.GranuleSize,
+	}
+	if schema.Engine == "" {
+		schema.Engine = "MergeTree"
 	}
 	for _, c := range j.Columns {
 		dt, err := types.ParseDataType(c.DataType)

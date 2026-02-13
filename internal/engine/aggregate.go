@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/harshithgowda/goose-db/internal/column"
@@ -15,6 +16,8 @@ type AggregateFunc struct {
 	Name   string // "count", "sum", "min", "max", "avg"
 	ArgCol string // column name argument (empty for count(*))
 	Alias  string // output column name
+	ParamF float64
+	ParamI int64
 }
 
 // AggregateOperator implements GROUP BY with aggregation functions.
@@ -103,7 +106,7 @@ func (a *AggregateOperator) Next() (*column.Block, error) {
 			if !ok {
 				accums := make([]Accumulator, len(a.aggregates))
 				for j, agg := range a.aggregates {
-					accums[j] = NewAccumulator(agg.Name)
+					accums[j] = NewAccumulator(agg)
 				}
 				gs = &groupState{keys: keyParts, accums: accums}
 				groups[keyStr] = gs
@@ -125,7 +128,7 @@ func (a *AggregateOperator) Next() (*column.Block, error) {
 		// No GROUP BY and no rows: still produce one row for aggregates
 		accums := make([]Accumulator, len(a.aggregates))
 		for j, agg := range a.aggregates {
-			accums[j] = NewAccumulator(agg.Name)
+			accums[j] = NewAccumulator(agg)
 		}
 		gs := &groupState{keys: nil, accums: accums}
 		groups[""] = gs
@@ -191,8 +194,8 @@ type Accumulator interface {
 }
 
 // NewAccumulator creates an Accumulator by function name.
-func NewAccumulator(name string) Accumulator {
-	switch strings.ToLower(name) {
+func NewAccumulator(agg AggregateFunc) Accumulator {
+	switch strings.ToLower(agg.Name) {
 	case "count":
 		return &countAccum{}
 	case "sum":
@@ -203,6 +206,20 @@ func NewAccumulator(name string) Accumulator {
 		return &maxAccum{}
 	case "avg":
 		return &avgAccum{}
+	case "uniq":
+		return &uniqAccum{seen: make(map[string]struct{})}
+	case "quantiles":
+		q := agg.ParamF
+		if q <= 0 || q >= 1 {
+			q = 0.5
+		}
+		return &quantileAccum{q: q}
+	case "topk":
+		k := int(agg.ParamI)
+		if k <= 0 {
+			k = 10
+		}
+		return &topKAccum{k: k, counts: make(map[string]uint64)}
 	default:
 		return &countAccum{} // fallback
 	}
@@ -287,8 +304,8 @@ func (a *avgAccum) Result() types.Value {
 	}
 	return a.sum / a.count
 }
-func (a *avgAccum) ResultType() types.DataType { return types.TypeFloat64 }
-func (a *avgAccum) SumCount() (float64, uint64)  { return a.sum, uint64(a.count) }
+func (a *avgAccum) ResultType() types.DataType  { return types.TypeFloat64 }
+func (a *avgAccum) SumCount() (float64, uint64) { return a.sum, uint64(a.count) }
 func (a *avgAccum) MergePartial(sum float64, count uint64) {
 	a.sum += sum
 	a.count += float64(count)
@@ -346,6 +363,81 @@ func (a *maxAccum) MergeValue(v types.Value, dt types.DataType) {
 	}
 }
 
+type uniqAccum struct {
+	seen map[string]struct{}
+}
+
+func (a *uniqAccum) Add(v types.Value, _ types.DataType) {
+	a.seen[fmt.Sprintf("%v", v)] = struct{}{}
+}
+func (a *uniqAccum) Result() types.Value        { return uint64(len(a.seen)) }
+func (a *uniqAccum) ResultType() types.DataType { return types.TypeUInt64 }
+
+type quantileAccum struct {
+	q      float64
+	values []float64
+}
+
+func (a *quantileAccum) Add(v types.Value, dt types.DataType) {
+	f, err := types.ToFloat64(dt, v)
+	if err == nil {
+		a.values = append(a.values, f)
+	}
+}
+func (a *quantileAccum) Result() types.Value {
+	n := len(a.values)
+	if n == 0 {
+		return float64(0)
+	}
+	cp := make([]float64, n)
+	copy(cp, a.values)
+	sort.Float64s(cp)
+	pos := int(a.q * float64(n-1))
+	if pos < 0 {
+		pos = 0
+	}
+	if pos >= n {
+		pos = n - 1
+	}
+	return cp[pos]
+}
+func (a *quantileAccum) ResultType() types.DataType { return types.TypeFloat64 }
+
+type topKAccum struct {
+	k      int
+	counts map[string]uint64
+}
+
+func (a *topKAccum) Add(v types.Value, _ types.DataType) {
+	a.counts[fmt.Sprintf("%v", v)]++
+}
+func (a *topKAccum) Result() types.Value {
+	type kv struct {
+		key string
+		cnt uint64
+	}
+	items := make([]kv, 0, len(a.counts))
+	for k, c := range a.counts {
+		items = append(items, kv{key: k, cnt: c})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].cnt != items[j].cnt {
+			return items[i].cnt > items[j].cnt
+		}
+		return items[i].key < items[j].key
+	})
+	limit := a.k
+	if limit > len(items) {
+		limit = len(items)
+	}
+	out := make([]string, limit)
+	for i := 0; i < limit; i++ {
+		out[i] = items[i].key
+	}
+	return strings.Join(out, ",")
+}
+func (a *topKAccum) ResultType() types.DataType { return types.TypeString }
+
 // InferType determines the DataType from a Go value.
 func InferType(v types.Value) types.DataType {
 	switch v.(type) {
@@ -386,10 +478,46 @@ func ExtractAggregates(selectExprs []parser.SelectExpr) []AggregateFunc {
 		}
 		name := strings.ToLower(fc.Name)
 		switch name {
-		case "count", "sum", "min", "max", "avg":
+		case "count", "sum", "min", "max", "avg", "uniq", "quantiles", "topk":
 			argCol := ""
-			if len(fc.Args) > 0 {
+			paramF := float64(0)
+			paramI := int64(0)
+
+			// Defaults / arg conventions:
+			// - quantiles(col) or quantiles(level, col)
+			// - topK(col) or topK(k, col)
+			if name == "quantiles" {
+				paramF = 0.5
+			}
+			if name == "topk" {
+				paramI = 10
+			}
+
+			switch len(fc.Args) {
+			case 1:
 				if ref, ok := fc.Args[0].(*parser.ColumnRef); ok {
+					argCol = ref.Name
+				}
+			case 2:
+				if lit, ok := fc.Args[0].(*parser.LiteralExpr); ok {
+					switch name {
+					case "quantiles":
+						switch v := lit.Value.(type) {
+						case int64:
+							paramF = float64(v)
+						case float64:
+							paramF = v
+						}
+					case "topk":
+						switch v := lit.Value.(type) {
+						case int64:
+							paramI = v
+						case float64:
+							paramI = int64(v)
+						}
+					}
+				}
+				if ref, ok := fc.Args[1].(*parser.ColumnRef); ok {
 					argCol = ref.Name
 				}
 			}
@@ -397,7 +525,7 @@ func ExtractAggregates(selectExprs []parser.SelectExpr) []AggregateFunc {
 			if alias == "" {
 				alias = ExprName(se.Expr)
 			}
-			aggs = append(aggs, AggregateFunc{Name: name, ArgCol: argCol, Alias: alias})
+			aggs = append(aggs, AggregateFunc{Name: name, ArgCol: argCol, Alias: alias, ParamF: paramF, ParamI: paramI})
 		}
 	}
 	return aggs
@@ -418,11 +546,25 @@ func hasAggregateExpr(e parser.Expression) bool {
 	case *parser.FunctionCall:
 		name := strings.ToLower(expr.Name)
 		switch name {
-		case "count", "sum", "min", "max", "avg":
+		case "count", "sum", "min", "max", "avg", "uniq", "quantiles", "topk":
 			return true
 		}
 	case *parser.BinaryExpr:
 		return hasAggregateExpr(expr.Left) || hasAggregateExpr(expr.Right)
 	}
 	return false
+}
+
+// CanUseTwoPhaseAggregation reports whether all aggregate functions are safe
+// for the partial+merge aggregation pipeline.
+func CanUseTwoPhaseAggregation(aggs []AggregateFunc) bool {
+	for _, a := range aggs {
+		switch strings.ToLower(a.Name) {
+		case "count", "sum", "min", "max", "avg":
+			// supported
+		default:
+			return false
+		}
+	}
+	return true
 }

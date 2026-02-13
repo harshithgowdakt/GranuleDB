@@ -59,6 +59,8 @@ func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResu
 
 	hasAggs := engine.HasAggregates(stmt.Columns)
 	isAggQuery := len(stmt.GroupBy) > 0 || hasAggs
+	aggs := engine.ExtractAggregates(stmt.Columns)
+	useTwoPhaseAgg := isAggQuery && engine.CanUseTwoPhaseAggregation(aggs)
 
 	var outNames []string
 	var lastProcIdx int
@@ -66,10 +68,16 @@ func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResu
 	if len(parts) == 0 {
 		// Empty table — build minimal pipeline.
 		if isAggQuery {
-			aggs := engine.ExtractAggregates(stmt.Columns)
-			// Single MergeAgg with 0 inputs handles empty-table aggregate.
-			mergeIdx := addProc(NewMergeAggregateProcessor(0, stmt.GroupBy, aggs))
-			lastProcIdx = mergeIdx
+			if useTwoPhaseAgg {
+				// Single MergeAgg with 0 inputs handles empty-table aggregate.
+				mergeIdx := addProc(NewMergeAggregateProcessor(0, stmt.GroupBy, aggs))
+				lastProcIdx = mergeIdx
+			} else {
+				concatIdx := addProc(NewConcatProcessor(0))
+				aggIdx := addProc(NewAggregateProcessor(stmt.GroupBy, aggs))
+				addEdge(concatIdx, 0, aggIdx, 0)
+				lastProcIdx = aggIdx
+			}
 
 			outNames = make([]string, 0, len(stmt.GroupBy)+len(aggs))
 			outNames = append(outNames, stmt.GroupBy...)
@@ -103,11 +111,12 @@ func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResu
 			}
 
 			if isAggQuery {
-				// Per-part partial aggregation.
-				aggs := engine.ExtractAggregates(stmt.Columns)
-				partialIdx := addProc(NewPartialAggregateProcessor(stmt.GroupBy, aggs))
-				addEdge(tailIdx, 0, partialIdx, 0)
-				tailIdx = partialIdx
+				if useTwoPhaseAgg {
+					// Per-part partial aggregation.
+					partialIdx := addProc(NewPartialAggregateProcessor(stmt.GroupBy, aggs))
+					addEdge(tailIdx, 0, partialIdx, 0)
+					tailIdx = partialIdx
+				}
 			} else {
 				// Per-part projection.
 				projIdx := addProc(NewProjectionProcessor(stmt.Columns))
@@ -119,13 +128,22 @@ func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResu
 		}
 
 		if isAggQuery {
-			// Merge all partial aggregations.
-			aggs := engine.ExtractAggregates(stmt.Columns)
-			mergeIdx := addProc(NewMergeAggregateProcessor(len(parts), stmt.GroupBy, aggs))
-			for i, tailIdx := range perPartTails {
-				addEdge(tailIdx, 0, mergeIdx, i)
+			if useTwoPhaseAgg {
+				// Merge all partial aggregations.
+				mergeIdx := addProc(NewMergeAggregateProcessor(len(parts), stmt.GroupBy, aggs))
+				for i, tailIdx := range perPartTails {
+					addEdge(tailIdx, 0, mergeIdx, i)
+				}
+				lastProcIdx = mergeIdx
+			} else {
+				concatIdx := addProc(NewConcatProcessor(len(parts)))
+				for i, tailIdx := range perPartTails {
+					addEdge(tailIdx, 0, concatIdx, i)
+				}
+				aggIdx := addProc(NewAggregateProcessor(stmt.GroupBy, aggs))
+				addEdge(concatIdx, 0, aggIdx, 0)
+				lastProcIdx = aggIdx
 			}
-			lastProcIdx = mergeIdx
 
 			outNames = make([]string, 0, len(stmt.GroupBy)+len(aggs))
 			outNames = append(outNames, stmt.GroupBy...)

@@ -150,7 +150,7 @@ func (p *PartialAggregateProcessor) accumulate() {
 		if !ok {
 			accums := make([]engine.Accumulator, len(p.aggregates))
 			for j, agg := range p.aggregates {
-				accums[j] = engine.NewAccumulator(agg.Name)
+				accums[j] = engine.NewAccumulator(agg)
 			}
 			gs = &partialGroupState{keys: keyParts, accums: accums}
 			p.groups[keyStr] = gs

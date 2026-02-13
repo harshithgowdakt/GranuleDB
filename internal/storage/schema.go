@@ -12,6 +12,7 @@ type ColumnDef struct {
 // TableSchema defines the schema and engine settings for a MergeTree table.
 type TableSchema struct {
 	Columns     []ColumnDef
+	Engine      string   // MergeTree, AggregatingMergeTree
 	OrderBy     []string // primary key column names (ORDER BY clause)
 	PartitionBy string   // single column name or empty
 	GranuleSize int      // rows per granule, default 8192
