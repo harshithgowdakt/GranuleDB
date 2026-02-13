@@ -52,6 +52,7 @@ func (ex *PipelineExecutor) Execute() error {
 
 	worker := func() {
 		defer wg.Done()
+		idleSpins := 0
 		for {
 			select {
 			case <-done:
@@ -61,6 +62,30 @@ func (ex *PipelineExecutor) Execute() error {
 					return
 				}
 				ex.processOne(graph, procIdx, queue, &finishedCount, finishedFlags, n, done, &closeOnce)
+				idleSpins = 0
+			default:
+				// Queue empty — sweep all processors to find unfinished work.
+				// This prevents lost scheduling from non-blocking enqueue.
+				idleSpins++
+				if idleSpins > 2 {
+					swept := false
+					for i := 0; i < n; i++ {
+						if !finishedFlags[i].Load() {
+							select {
+							case queue <- i:
+								swept = true
+							default:
+							}
+						}
+					}
+					if swept {
+						idleSpins = 0
+					} else {
+						runtime.Gosched()
+					}
+				} else {
+					runtime.Gosched()
+				}
 			}
 		}
 	}
@@ -85,6 +110,11 @@ func (ex *PipelineExecutor) processOne(
 	done chan struct{},
 	closeOnce *sync.Once,
 ) {
+	// Skip already-finished processors immediately.
+	if finishedFlags[procIdx].Load() {
+		return
+	}
+
 	// Try to claim. If another goroutine is working on it, skip.
 	if !graph.TryClaim(procIdx) {
 		return
@@ -128,12 +158,13 @@ func (ex *PipelineExecutor) processOne(
 		}
 
 	case StatusFinished:
-		for _, down := range graph.Downstream(procIdx) {
-			enqueueIfOpen(queue, done, down)
-		}
-
-		// Only count each processor's finish once.
+		// Only enqueue downstream and count on the first finish.
+		// Re-entries (from stale queue items) are no-ops to prevent
+		// queue saturation in pipelines with multi-input processors.
 		if finishedFlags[procIdx].CompareAndSwap(false, true) {
+			for _, down := range graph.Downstream(procIdx) {
+				enqueueIfOpen(queue, done, down)
+			}
 			if int(finishedCount.Add(1)) >= totalProcs {
 				closeOnce.Do(func() { close(done) })
 			}
@@ -142,14 +173,13 @@ func (ex *PipelineExecutor) processOne(
 }
 
 func enqueueIfOpen(queue chan int, done chan struct{}, procIdx int) {
-	for {
-		select {
-		case <-done:
-			return
-		case queue <- procIdx:
-			return
-		default:
-			runtime.Gosched()
-		}
+	select {
+	case <-done:
+		return
+	case queue <- procIdx:
+		return
+	default:
+		// Queue is full — skip. The processor will be rescheduled by
+		// the idle-sweep mechanism or another worker processing a neighbor.
 	}
 }
