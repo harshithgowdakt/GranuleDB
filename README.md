@@ -27,7 +27,7 @@ compatibility, and performance guarantees required for real production workloads
 ## Quick Start
 
 ```bash
-go run ./cmd/goosedb
+go run ./cmd/granuledb
 ```
 
 By default, GranuleDB starts an HTTP server on `:8123`.
