@@ -17,11 +17,17 @@ type PipelineResult struct {
 
 // BuildPipeline constructs a processor DAG from a SELECT statement.
 //
-// DAG structure:
+// For non-aggregate queries (ClickHouse-like parallel scan):
 //
-//	[Source_0] ──┐
-//	[Source_1] ──┼── [Concat] ── [Filter?] ── [Agg|Proj] ── [Sort?] ── [Limit?] ── [Output]
-//	[Source_N] ──┘
+//	[Source_0] ── [Filter_0] ── [Proj_0] ──┐
+//	[Source_1] ── [Filter_1] ── [Proj_1] ──┼── [Concat] ── [Sort?] ── [Limit?] ── [Output]
+//	[Source_N] ── [Filter_N] ── [Proj_N] ──┘
+//
+// For aggregate queries (two-phase parallel aggregation):
+//
+//	[Source_0] ── [Filter_0] ── [PartialAgg_0] ──┐
+//	[Source_1] ── [Filter_1] ── [PartialAgg_1] ──┼── [MergeAgg] ── [Sort?] ── [Limit?] ── [Output]
+//	[Source_N] ── [Filter_N] ── [PartialAgg_N] ──┘
 func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResult, error) {
 	table, ok := db.GetTable(stmt.From)
 	if !ok {
@@ -42,92 +48,125 @@ func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResu
 		return idx
 	}
 
-	// 1. Create source processors (one per part).
-	sourceIndices := make([]int, len(parts))
-	for i, part := range parts {
-		src := NewSourceProcessor(table, part, neededCols, keyRanges)
-		sourceIndices[i] = addProc(src)
+	addEdge := func(outProc, outPort, inProc, inPort int) {
+		allEdges = append(allEdges, Edge{
+			OutputProcessor: outProc,
+			OutputPortIdx:   outPort,
+			InputProcessor:  inProc,
+			InputPortIdx:    inPort,
+		})
 	}
 
-	// 2. Concat or direct wire.
+	hasAggs := engine.HasAggregates(stmt.Columns)
+	isAggQuery := len(stmt.GroupBy) > 0 || hasAggs
+
+	var outNames []string
 	var lastProcIdx int
+
 	if len(parts) == 0 {
-		concat := NewConcatProcessor(0)
-		lastProcIdx = addProc(concat)
-	} else if len(parts) == 1 {
-		lastProcIdx = sourceIndices[0]
-	} else {
-		concat := NewConcatProcessor(len(parts))
-		concatIdx := addProc(concat)
-		for i, srcIdx := range sourceIndices {
-			allEdges = append(allEdges, Edge{
-				OutputProcessor: srcIdx,
-				OutputPortIdx:   0,
-				InputProcessor:  concatIdx,
-				InputPortIdx:    i,
-			})
+		// Empty table — build minimal pipeline.
+		if isAggQuery {
+			aggs := engine.ExtractAggregates(stmt.Columns)
+			// Single MergeAgg with 0 inputs handles empty-table aggregate.
+			mergeIdx := addProc(NewMergeAggregateProcessor(0, stmt.GroupBy, aggs))
+			lastProcIdx = mergeIdx
+
+			outNames = make([]string, 0, len(stmt.GroupBy)+len(aggs))
+			outNames = append(outNames, stmt.GroupBy...)
+			for _, a := range aggs {
+				outNames = append(outNames, a.Alias)
+			}
+		} else {
+			concat := NewConcatProcessor(0)
+			concatIdx := addProc(concat)
+
+			projIdx := addProc(NewProjectionProcessor(stmt.Columns))
+			addEdge(concatIdx, 0, projIdx, 0)
+			lastProcIdx = projIdx
+
+			outNames = buildProjectionNames(stmt, table)
 		}
-		lastProcIdx = concatIdx
+	} else {
+		// Build per-part parallel pipelines.
+		perPartTails := make([]int, len(parts))
+
+		for i, part := range parts {
+			// Source for this part.
+			sourceIdx := addProc(NewSourceProcessor(table, part, neededCols, keyRanges))
+			tailIdx := sourceIdx
+
+			// Per-part filter.
+			if stmt.Where != nil {
+				filterIdx := addProc(NewFilterProcessor(stmt.Where))
+				addEdge(tailIdx, 0, filterIdx, 0)
+				tailIdx = filterIdx
+			}
+
+			if isAggQuery {
+				// Per-part partial aggregation.
+				aggs := engine.ExtractAggregates(stmt.Columns)
+				partialIdx := addProc(NewPartialAggregateProcessor(stmt.GroupBy, aggs))
+				addEdge(tailIdx, 0, partialIdx, 0)
+				tailIdx = partialIdx
+			} else {
+				// Per-part projection.
+				projIdx := addProc(NewProjectionProcessor(stmt.Columns))
+				addEdge(tailIdx, 0, projIdx, 0)
+				tailIdx = projIdx
+			}
+
+			perPartTails[i] = tailIdx
+		}
+
+		if isAggQuery {
+			// Merge all partial aggregations.
+			aggs := engine.ExtractAggregates(stmt.Columns)
+			mergeIdx := addProc(NewMergeAggregateProcessor(len(parts), stmt.GroupBy, aggs))
+			for i, tailIdx := range perPartTails {
+				addEdge(tailIdx, 0, mergeIdx, i)
+			}
+			lastProcIdx = mergeIdx
+
+			outNames = make([]string, 0, len(stmt.GroupBy)+len(aggs))
+			outNames = append(outNames, stmt.GroupBy...)
+			for _, a := range aggs {
+				outNames = append(outNames, a.Alias)
+			}
+		} else {
+			// Concat all per-part projection outputs.
+			if len(parts) == 1 {
+				lastProcIdx = perPartTails[0]
+			} else {
+				concatIdx := addProc(NewConcatProcessor(len(parts)))
+				for i, tailIdx := range perPartTails {
+					addEdge(tailIdx, 0, concatIdx, i)
+				}
+				lastProcIdx = concatIdx
+			}
+
+			outNames = buildProjectionNames(stmt, table)
+		}
 	}
 
 	// Helper: chain a processor to the current tail.
 	chain := func(proc Processor) int {
 		idx := addProc(proc)
-		allEdges = append(allEdges, Edge{
-			OutputProcessor: lastProcIdx,
-			OutputPortIdx:   0,
-			InputProcessor:  idx,
-			InputPortIdx:    0,
-		})
+		addEdge(lastProcIdx, 0, idx, 0)
 		lastProcIdx = idx
 		return idx
 	}
 
-	// 3. Filter (WHERE).
-	if stmt.Where != nil {
-		chain(NewFilterProcessor(stmt.Where))
-	}
-
-	// 4. Aggregate or Projection.
-	hasAggs := engine.HasAggregates(stmt.Columns)
-	var outNames []string
-
-	if len(stmt.GroupBy) > 0 || hasAggs {
-		aggs := engine.ExtractAggregates(stmt.Columns)
-		chain(NewAggregateProcessor(stmt.GroupBy, aggs))
-
-		outNames = make([]string, 0, len(stmt.GroupBy)+len(aggs))
-		outNames = append(outNames, stmt.GroupBy...)
-		for _, a := range aggs {
-			outNames = append(outNames, a.Alias)
-		}
-	} else {
-		chain(NewProjectionProcessor(stmt.Columns))
-
-		outNames = make([]string, len(stmt.Columns))
-		for i, se := range stmt.Columns {
-			if se.Alias != "" {
-				outNames[i] = se.Alias
-			} else if _, ok := se.Expr.(*parser.StarExpr); ok {
-				outNames = table.Schema.ColumnNames()
-				break
-			} else {
-				outNames[i] = engine.ExprName(se.Expr)
-			}
-		}
-	}
-
-	// 5. Sort (ORDER BY).
+	// Sort (ORDER BY).
 	if len(stmt.OrderBy) > 0 {
 		chain(NewSortProcessor(stmt.OrderBy))
 	}
 
-	// 6. Limit.
+	// Limit.
 	if stmt.Limit != nil {
 		chain(NewLimitProcessor(*stmt.Limit))
 	}
 
-	// 7. Output sink.
+	// Output sink.
 	output := NewOutputProcessor()
 	chain(output)
 
@@ -145,4 +184,20 @@ func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResu
 		Output:   output,
 		OutNames: outNames,
 	}, nil
+}
+
+// buildProjectionNames determines output column names for non-aggregate queries.
+func buildProjectionNames(stmt *parser.SelectStmt, table *storage.MergeTreeTable) []string {
+	outNames := make([]string, len(stmt.Columns))
+	for i, se := range stmt.Columns {
+		if se.Alias != "" {
+			outNames[i] = se.Alias
+		} else if _, ok := se.Expr.(*parser.StarExpr); ok {
+			outNames = table.Schema.ColumnNames()
+			break
+		} else {
+			outNames[i] = engine.ExprName(se.Expr)
+		}
+	}
+	return outNames
 }

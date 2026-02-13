@@ -5,8 +5,9 @@ import (
 	"github.com/harshithgowda/goose-db/internal/storage"
 )
 
-// SourceProcessor reads data from a single storage Part.
-// One per part enables parallel reads across parts.
+// SourceProcessor reads data from a single storage Part using morsel-driven
+// streaming. Each Work() call reads one granule and pushes a small chunk,
+// enabling pipeline parallelism with the work-stealing executor.
 type SourceProcessor struct {
 	BaseProcessor
 
@@ -15,9 +16,14 @@ type SourceProcessor struct {
 	columns   []string
 	keyRanges []engine.KeyRange
 
+	granuleBegin int  // start of scan range (after index pruning)
+	granuleEnd   int  // end of scan range
+	currentGran  int  // next granule to read
+	batchSize    int  // granules per Work() call
+	rangeResolved bool // true after index pruning is done
+	reader       *storage.PartReader
+
 	chunk    *Chunk // produced chunk waiting to be pushed
-	read     bool   // true after Work() has been called
-	pushed   bool   // true after chunk has been pushed
 	finished bool
 }
 
@@ -34,6 +40,7 @@ func NewSourceProcessor(
 		part:          part,
 		columns:       columns,
 		keyRanges:     keyRanges,
+		batchSize:     1, // one granule per Work() call
 	}
 }
 
@@ -49,8 +56,35 @@ func (s *SourceProcessor) Prepare() Status {
 		return StatusFinished
 	}
 
-	// If we already pushed, wait for downstream to consume then finish.
-	if s.pushed {
+	// If we have a chunk ready to push.
+	if s.chunk != nil {
+		if out.CanPush() {
+			out.Push(s.chunk)
+			s.chunk = nil
+			// After push, check if more granules remain.
+			if s.currentGran >= s.granuleEnd {
+				// No more granules — wait for downstream to consume, then finish.
+				return StatusPortFull
+			}
+			// More granules to read — signal port full so executor re-schedules us.
+			return StatusPortFull
+		}
+		return StatusPortFull
+	}
+
+	// Resolve granule range once via primary index pruning.
+	if !s.rangeResolved {
+		s.resolveRange()
+		s.rangeResolved = true
+		if s.currentGran >= s.granuleEnd {
+			s.finished = true
+			out.SetFinished()
+			return StatusFinished
+		}
+	}
+
+	// All granules read and last chunk pushed — finish.
+	if s.currentGran >= s.granuleEnd {
 		if out.CanPush() {
 			s.finished = true
 			out.SetFinished()
@@ -59,26 +93,7 @@ func (s *SourceProcessor) Prepare() Status {
 		return StatusPortFull
 	}
 
-	// If we have a chunk ready to push.
-	if s.chunk != nil {
-		if out.CanPush() {
-			out.Push(s.chunk)
-			s.chunk = nil
-			s.pushed = true
-			// Don't SetFinished yet — wait for downstream to consume.
-			return StatusPortFull
-		}
-		return StatusPortFull
-	}
-
-	// If Work() ran but produced no chunk (pruned/empty part).
-	if s.read {
-		s.finished = true
-		out.SetFinished()
-		return StatusFinished
-	}
-
-	// Need to read the part.
+	// Ready to read next granule batch.
 	if !out.CanPush() {
 		return StatusPortFull
 	}
@@ -87,36 +102,46 @@ func (s *SourceProcessor) Prepare() Status {
 }
 
 func (s *SourceProcessor) Work() {
-	s.read = true
+	if s.reader == nil {
+		s.reader = storage.NewPartReader(s.part, &s.table.Schema)
+	}
 
-	reader := storage.NewPartReader(s.part, &s.table.Schema)
+	// Read a batch of granules [currentGran, currentGran+batchSize).
+	end := s.currentGran + s.batchSize
+	if end > s.granuleEnd {
+		end = s.granuleEnd
+	}
 
-	granuleBegin := 0
-	granuleEnd := s.part.NumGranules
+	block, err := s.reader.ReadColumns(s.columns, s.currentGran, end)
+	s.currentGran = end
 
-	if len(s.keyRanges) > 0 && granuleEnd > 0 {
+	if err != nil || block == nil || block.NumRows() == 0 {
+		return
+	}
+
+	s.chunk = NewChunk(block)
+}
+
+// resolveRange uses the primary index to determine the granule scan range.
+func (s *SourceProcessor) resolveRange() {
+	s.granuleBegin = 0
+	s.granuleEnd = s.part.NumGranules
+
+	if len(s.keyRanges) > 0 && s.granuleEnd > 0 {
+		reader := storage.NewPartReader(s.part, &s.table.Schema)
 		idx, err := reader.LoadPrimaryIndex()
 		if err == nil {
 			for _, kr := range s.keyRanges {
 				gb, ge := idx.FindGranuleRange(kr.KeyColumn, kr.MinVal, kr.MaxVal)
-				if gb > granuleBegin {
-					granuleBegin = gb
+				if gb > s.granuleBegin {
+					s.granuleBegin = gb
 				}
-				if ge < granuleEnd {
-					granuleEnd = ge
+				if ge < s.granuleEnd {
+					s.granuleEnd = ge
 				}
 			}
 		}
 	}
 
-	if granuleBegin >= granuleEnd {
-		return
-	}
-
-	block, err := reader.ReadColumns(s.columns, granuleBegin, granuleEnd)
-	if err != nil || block.NumRows() == 0 {
-		return
-	}
-
-	s.chunk = NewChunk(block)
+	s.currentGran = s.granuleBegin
 }

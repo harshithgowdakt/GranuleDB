@@ -288,6 +288,63 @@ func (a *avgAccum) Result() types.Value {
 	return a.sum / a.count
 }
 func (a *avgAccum) ResultType() types.DataType { return types.TypeFloat64 }
+func (a *avgAccum) SumCount() (float64, uint64)  { return a.sum, uint64(a.count) }
+func (a *avgAccum) MergePartial(sum float64, count uint64) {
+	a.sum += sum
+	a.count += float64(count)
+}
+
+// AvgState exposes raw sum/count for two-phase aggregation merging.
+type AvgState interface {
+	SumCount() (float64, uint64)
+	MergePartial(sum float64, count uint64)
+}
+
+// MergeableAccumulator extends Accumulator with merge support for
+// two-phase parallel aggregation.
+type MergeableAccumulator interface {
+	Accumulator
+	// MergeValue merges a partial aggregate result value into this accumulator.
+	MergeValue(v types.Value, dt types.DataType)
+}
+
+func (a *countAccum) MergeValue(v types.Value, _ types.DataType) {
+	switch n := v.(type) {
+	case uint64:
+		a.n += n
+	case int64:
+		a.n += uint64(n)
+	case float64:
+		a.n += uint64(n)
+	}
+}
+
+func (a *sumAccum) MergeValue(v types.Value, dt types.DataType) {
+	f, err := types.ToFloat64(dt, v)
+	if err == nil {
+		a.sum += f
+	}
+}
+
+func (a *minAccum) MergeValue(v types.Value, dt types.DataType) {
+	f, err := types.ToFloat64(dt, v)
+	if err == nil {
+		if !a.first || f < a.val {
+			a.val = f
+			a.first = true
+		}
+	}
+}
+
+func (a *maxAccum) MergeValue(v types.Value, dt types.DataType) {
+	f, err := types.ToFloat64(dt, v)
+	if err == nil {
+		if !a.first || f > a.val {
+			a.val = f
+			a.first = true
+		}
+	}
+}
 
 // InferType determines the DataType from a Go value.
 func InferType(v types.Value) types.DataType {
