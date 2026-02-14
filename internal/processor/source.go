@@ -106,10 +106,7 @@ func (s *SourceProcessor) Work() {
 	}
 
 	// Read a batch of granules [currentGran, currentGran+batchSize).
-	end := s.currentGran + s.batchSize
-	if end > s.granuleEnd {
-		end = s.granuleEnd
-	}
+	end := min(s.currentGran+s.batchSize, s.granuleEnd)
 
 	block, err := s.reader.ReadColumns(s.columns, s.currentGran, end)
 	s.currentGran = end
