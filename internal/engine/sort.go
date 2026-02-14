@@ -51,36 +51,16 @@ func (s *SortOperator) Next() (*column.Block, error) {
 		return nil, nil
 	}
 
-	// Sort by ORDER BY columns
+	// Sort by ORDER BY columns with per-column direction.
 	sortCols := make([]string, len(s.orderBy))
+	desc := make([]bool, len(s.orderBy))
 	for i, ob := range s.orderBy {
 		sortCols[i] = ob.Column
+		desc[i] = ob.Desc
 	}
 
-	if err := all.SortByColumns(sortCols); err != nil {
+	if err := all.SortByColumnsWithDirection(sortCols, desc); err != nil {
 		return nil, err
-	}
-
-	// Handle DESC ordering by reversing
-	hasDesc := false
-	for _, ob := range s.orderBy {
-		if ob.Desc {
-			hasDesc = true
-			break
-		}
-	}
-	if hasDesc && len(s.orderBy) == 1 && s.orderBy[0].Desc {
-		// Simple case: reverse the entire block
-		n := all.NumRows()
-		indices := make([]int, n)
-		for i := range indices {
-			indices[i] = n - 1 - i
-		}
-		newCols := make([]column.Column, len(all.Columns))
-		for c, col := range all.Columns {
-			newCols[c] = column.Gather(col, indices)
-		}
-		all = column.NewBlock(all.ColumnNames, newCols)
 	}
 
 	return all, nil

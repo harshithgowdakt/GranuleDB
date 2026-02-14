@@ -82,26 +82,15 @@ func (s *SortProcessor) Prepare() Status {
 }
 
 func (s *SortProcessor) Work() {
+	// Sort by ORDER BY columns with per-column direction.
 	sortCols := make([]string, len(s.orderBy))
+	desc := make([]bool, len(s.orderBy))
 	for i, ob := range s.orderBy {
 		sortCols[i] = ob.Column
+		desc[i] = ob.Desc
 	}
 
-	s.accumulated.SortByColumns(sortCols)
-
-	// Handle DESC: if single column DESC, reverse the block.
-	if len(s.orderBy) == 1 && s.orderBy[0].Desc {
-		n := s.accumulated.NumRows()
-		indices := make([]int, n)
-		for i := range indices {
-			indices[i] = n - 1 - i
-		}
-		newCols := make([]column.Column, len(s.accumulated.Columns))
-		for c, col := range s.accumulated.Columns {
-			newCols[c] = column.Gather(col, indices)
-		}
-		s.accumulated = column.NewBlock(s.accumulated.ColumnNames, newCols)
-	}
+	s.accumulated.SortByColumnsWithDirection(sortCols, desc)
 
 	s.sorted = NewChunk(s.accumulated)
 	s.accumulated = nil

@@ -157,36 +157,74 @@ func collapseAggregatingRows(block *column.Block, orderBy []string) *column.Bloc
 				continue
 			}
 
-			sumF := float64(0)
-			for r := start; r < end; r++ {
-				f, err := types.ToFloat64(dt, c.Value(r))
-				if err == nil {
-					sumF += f
-				}
-			}
+			// Use type-specific accumulators to avoid float64 precision loss.
 			switch dt {
 			case types.TypeUInt8:
-				outCols[cIdx].Append(uint8(sumF))
+				var sum uint8
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(uint8)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeUInt16:
-				outCols[cIdx].Append(uint16(sumF))
+				var sum uint16
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(uint16)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeUInt32:
-				outCols[cIdx].Append(uint32(sumF))
+				var sum uint32
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(uint32)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeUInt64:
-				outCols[cIdx].Append(uint64(sumF))
+				var sum uint64
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(uint64)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeInt8:
-				outCols[cIdx].Append(int8(sumF))
+				var sum int8
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(int8)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeInt16:
-				outCols[cIdx].Append(int16(sumF))
+				var sum int16
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(int16)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeInt32:
-				outCols[cIdx].Append(int32(sumF))
+				var sum int32
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(int32)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeInt64:
-				outCols[cIdx].Append(int64(sumF))
+				var sum int64
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(int64)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeFloat32:
-				outCols[cIdx].Append(float32(sumF))
+				var sum float32
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(float32)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeFloat64:
-				outCols[cIdx].Append(sumF)
+				var sum float64
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(float64)
+				}
+				outCols[cIdx].Append(sum)
 			case types.TypeDateTime:
-				outCols[cIdx].Append(uint32(sumF))
+				var sum uint32
+				for r := start; r < end; r++ {
+					sum += c.Value(r).(uint32)
+				}
+				outCols[cIdx].Append(sum)
 			default:
 				outCols[cIdx].Append(c.Value(start))
 			}

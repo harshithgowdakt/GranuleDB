@@ -146,6 +146,60 @@ func (b *Block) SortByColumns(sortCols []string) error {
 	return nil
 }
 
+// SortByColumnsWithDirection sorts the block by the given column names,
+// each with an independent ASC/DESC direction.
+func (b *Block) SortByColumnsWithDirection(sortCols []string, desc []bool) error {
+	if b.NumRows() <= 1 {
+		return nil
+	}
+
+	type sortKey struct {
+		colIdx int
+		dt     types.DataType
+		desc   bool
+	}
+	keys := make([]sortKey, len(sortCols))
+	for i, name := range sortCols {
+		idx, ok := b.GetColumnIndex(name)
+		if !ok {
+			return fmt.Errorf("sort column not found: %s", name)
+		}
+		d := false
+		if i < len(desc) {
+			d = desc[i]
+		}
+		keys[i] = sortKey{colIdx: idx, dt: b.Columns[idx].DataType(), desc: d}
+	}
+
+	n := b.NumRows()
+	indices := make([]int, n)
+	for i := range indices {
+		indices[i] = i
+	}
+
+	sort.SliceStable(indices, func(a, z int) bool {
+		for _, k := range keys {
+			va := b.Columns[k.colIdx].Value(indices[a])
+			vz := b.Columns[k.colIdx].Value(indices[z])
+			cmp := types.CompareValues(k.dt, va, vz)
+			if cmp != 0 {
+				if k.desc {
+					return cmp > 0
+				}
+				return cmp < 0
+			}
+		}
+		return false
+	})
+
+	newCols := make([]Column, len(b.Columns))
+	for i, c := range b.Columns {
+		newCols[i] = Gather(c, indices)
+	}
+	b.Columns = newCols
+	return nil
+}
+
 // SelectColumns returns a new block with only the specified columns.
 func (b *Block) SelectColumns(names []string) (*Block, error) {
 	cols := make([]Column, len(names))
