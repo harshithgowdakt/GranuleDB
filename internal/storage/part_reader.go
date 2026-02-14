@@ -72,6 +72,8 @@ func (pr *PartReader) ReadColumns(columnNames []string, granuleBegin, granuleEnd
 }
 
 // readColumnGranules reads granules [begin, end) for a single column.
+// Only the byte range covering the requested granules is read from disk,
+// matching ClickHouse's pread()-style I/O for granule-level selectivity.
 func (pr *PartReader) readColumnGranules(colName string, dt types.DataType, granuleBegin, granuleEnd int) (column.Column, error) {
 	// Load mark file
 	mrkPath := filepath.Join(pr.part.BasePath, colName+".mrk")
@@ -80,11 +82,42 @@ func (pr *PartReader) readColumnGranules(colName string, dt types.DataType, gran
 		return nil, fmt.Errorf("reading marks: %w", err)
 	}
 
-	// Load .bin file
+	if granuleBegin >= len(marks) {
+		return column.NewColumn(dt), nil
+	}
+	if granuleEnd > len(marks) {
+		granuleEnd = len(marks)
+	}
+
+	// Determine the byte range [readStart, readEnd) in the .bin file.
+	readStart := int64(marks[granuleBegin].OffsetInCompressedFile)
+
 	binPath := filepath.Join(pr.part.BasePath, colName+".bin")
-	binData, err := os.ReadFile(binPath)
+	f, err := os.Open(binPath)
 	if err != nil {
-		return nil, fmt.Errorf("reading bin file: %w", err)
+		return nil, fmt.Errorf("opening bin file: %w", err)
+	}
+	defer f.Close()
+
+	// Read end: if there's a mark after our range, use its offset;
+	// otherwise read to end of file.
+	var readEnd int64
+	if granuleEnd < len(marks) {
+		readEnd = int64(marks[granuleEnd].OffsetInCompressedFile)
+	} else {
+		fi, err := f.Stat()
+		if err != nil {
+			return nil, fmt.Errorf("stat bin file: %w", err)
+		}
+		readEnd = fi.Size()
+	}
+
+	// Read only the needed byte range from disk.
+	readLen := readEnd - readStart
+	binData := make([]byte, readLen)
+	_, err = f.ReadAt(binData, readStart)
+	if err != nil {
+		return nil, fmt.Errorf("reading bin range [%d, %d): %w", readStart, readEnd, err)
 	}
 
 	// Compute row count and granule sizes
@@ -94,12 +127,8 @@ func (pr *PartReader) readColumnGranules(colName string, dt types.DataType, gran
 	// Read each granule
 	result := column.NewColumn(dt)
 	for g := granuleBegin; g < granuleEnd; g++ {
-		if g >= len(marks) {
-			break
-		}
-
-		mark := marks[g]
-		offset := int(mark.OffsetInCompressedFile)
+		// Offset within our read buffer (relative to readStart).
+		offset := int(int64(marks[g].OffsetInCompressedFile) - readStart)
 
 		if offset >= len(binData) {
 			break

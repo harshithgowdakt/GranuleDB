@@ -2,6 +2,8 @@ package engine
 
 import (
 	"fmt"
+	"log"
+	"strings"
 
 	"github.com/harshithgowdakt/granuledb/internal/parser"
 	"github.com/harshithgowdakt/granuledb/internal/storage"
@@ -17,12 +19,27 @@ func PlanSelect(stmt *parser.SelectStmt, db *storage.Database) (Operator, []stri
 
 	// Determine all columns needed from the table
 	neededCols := CollectNeededColumns(stmt, &table.Schema)
+	log.Printf("[planner] table=%s, columns needed: [%s]", stmt.From, strings.Join(neededCols, ", "))
 
 	// Build KeyCondition for primary index pruning
 	keyCond := storage.NewKeyConditionForPrimaryKey(stmt.Where, &table.Schema)
+	if keyCond != nil {
+		log.Printf("[planner] primary key condition built for ORDER BY %v", table.Schema.OrderBy)
+	} else {
+		log.Printf("[planner] no primary key condition (WHERE doesn't reference key columns %v)", table.Schema.OrderBy)
+	}
 
 	// Centralized partition pruning via storage.FilterParts
-	parts, _ := storage.FilterParts(stmt.Where, &table.Schema, table.GetActiveParts())
+	allParts := table.GetActiveParts()
+	parts, counters := storage.FilterParts(stmt.Where, &table.Schema, allParts)
+	log.Printf("[planner] partition pruning: %d/%d parts survived", counters.SurvivedParts, counters.InitialParts)
+
+	// Count total granules across selected parts.
+	totalGranules := 0
+	for _, p := range parts {
+		totalGranules += p.NumGranules
+	}
+	log.Printf("[planner] scanning %d parts, %d total granules", len(parts), totalGranules)
 
 	// Build operator chain bottom-up
 	var op Operator

@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"fmt"
+	"log"
 	"strings"
 
 	"github.com/harshithgowdakt/granuledb/internal/parser"
@@ -363,7 +365,29 @@ func (kc *KeyCondition) CheckInPrimaryIndex(idx *PrimaryIndex) (begin, end int) 
 	end = idx.NumGranules
 
 	if idx.NumGranules == 0 {
+		log.Printf("[primary-key] index has 0 granules, nothing to prune")
 		return 0, 0
+	}
+
+	log.Printf("[primary-key] evaluating %d granules against key columns %v", idx.NumGranules, kc.keyColumns)
+
+	// Log granule boundaries for visibility.
+	for g := 0; g < idx.NumGranules; g++ {
+		vals := make([]string, len(idx.KeyColumns))
+		for k := range idx.KeyColumns {
+			vals[k] = fmt.Sprintf("%v", idx.Values[g][k])
+		}
+		var nextBound string
+		if g+1 < idx.NumGranules {
+			nvals := make([]string, len(idx.KeyColumns))
+			for k := range idx.KeyColumns {
+				nvals[k] = fmt.Sprintf("%v", idx.Values[g+1][k])
+			}
+			nextBound = fmt.Sprintf("[%s)", strings.Join(nvals, ","))
+		} else {
+			nextBound = "+∞)"
+		}
+		log.Printf("[primary-key]   granule %d: [%s, %s", g, strings.Join(vals, ","), nextBound)
 	}
 
 	// Forward scan: find first granule where condition CanBeTrue.
@@ -374,8 +398,10 @@ func (kc *KeyCondition) CheckInPrimaryIndex(idx *PrimaryIndex) (begin, end int) 
 			begin = g
 			break
 		}
+		log.Printf("[primary-key]   granule %d: skipped (condition always false)", g)
 		if g == idx.NumGranules-1 {
 			// All granules pruned.
+			log.Printf("[primary-key] all %d granules pruned — no matching data", idx.NumGranules)
 			return idx.NumGranules, idx.NumGranules
 		}
 	}
@@ -388,7 +414,13 @@ func (kc *KeyCondition) CheckInPrimaryIndex(idx *PrimaryIndex) (begin, end int) 
 			end = g + 1
 			break
 		}
+		log.Printf("[primary-key]   granule %d: skipped from tail (condition always false)", g)
 	}
+
+	selected := end - begin
+	skipped := idx.NumGranules - selected
+	log.Printf("[primary-key] selected granules [%d, %d) — %d/%d granules, %d skipped",
+		begin, end, selected, idx.NumGranules, skipped)
 
 	return begin, end
 }

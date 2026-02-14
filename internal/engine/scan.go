@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"log"
+	"strings"
+
 	"github.com/harshithgowdakt/granuledb/internal/column"
 	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
@@ -30,6 +33,8 @@ func NewTableScanOperator(table *storage.MergeTreeTable, columns []string, keyCo
 func (s *TableScanOperator) Open() error {
 	s.currentPart = 0
 	s.done = false
+	log.Printf("[scan] opening table scan: %d parts, reading columns [%s]",
+		len(s.parts), strings.Join(s.columns, ", "))
 	return nil
 }
 
@@ -52,16 +57,23 @@ func (s *TableScanOperator) Next() (*column.Block, error) {
 		}
 
 		if granuleBegin >= granuleEnd {
+			log.Printf("[scan] part %s: all %d granules pruned — skipping entire part",
+				part.Info.DirName(), part.NumGranules)
 			continue // skip this part entirely
 		}
+
+		log.Printf("[scan] part %s: reading granules [%d, %d) of %d",
+			part.Info.DirName(), granuleBegin, granuleEnd, part.NumGranules)
 
 		block, err := reader.ReadColumns(s.columns, granuleBegin, granuleEnd)
 		if err != nil {
 			return nil, err
 		}
 		if block.NumRows() == 0 {
+			log.Printf("[scan] part %s: block empty after read", part.Info.DirName())
 			continue
 		}
+		log.Printf("[scan] part %s: read %d rows", part.Info.DirName(), block.NumRows())
 		return block, nil
 	}
 

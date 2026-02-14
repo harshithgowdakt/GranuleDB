@@ -2,6 +2,8 @@ package processor
 
 import (
 	"fmt"
+	"log"
+	"strings"
 
 	"github.com/harshithgowdakt/granuledb/internal/engine"
 	"github.com/harshithgowdakt/granuledb/internal/parser"
@@ -35,10 +37,25 @@ func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResu
 	}
 
 	neededCols := engine.CollectNeededColumns(stmt, &table.Schema)
+	log.Printf("[pipeline] table=%s, columns needed: [%s]", stmt.From, strings.Join(neededCols, ", "))
+
 	keyCond := storage.NewKeyConditionForPrimaryKey(stmt.Where, &table.Schema)
+	if keyCond != nil {
+		log.Printf("[pipeline] primary key condition built for ORDER BY %v", table.Schema.OrderBy)
+	} else {
+		log.Printf("[pipeline] no primary key condition (WHERE doesn't reference key columns %v)", table.Schema.OrderBy)
+	}
 
 	// Centralized partition pruning via storage.FilterParts
-	parts, _ := storage.FilterParts(stmt.Where, &table.Schema, table.GetActiveParts())
+	allParts := table.GetActiveParts()
+	parts, counters := storage.FilterParts(stmt.Where, &table.Schema, allParts)
+	log.Printf("[pipeline] partition pruning: %d/%d parts survived", counters.SurvivedParts, counters.InitialParts)
+
+	totalGranules := 0
+	for _, p := range parts {
+		totalGranules += p.NumGranules
+	}
+	log.Printf("[pipeline] building pipeline: %d parts, %d total granules", len(parts), totalGranules)
 
 	var allProcs []Processor
 	var allEdges []Edge

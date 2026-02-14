@@ -1,6 +1,9 @@
 package processor
 
 import (
+	"log"
+	"strings"
+
 	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
 
@@ -123,12 +126,25 @@ func (s *SourceProcessor) resolveRange() {
 	s.granuleBegin = 0
 	s.granuleEnd = s.part.NumGranules
 
+	log.Printf("[source] part %s: resolving granule range (%d total granules), reading columns [%s]",
+		s.part.Info.DirName(), s.part.NumGranules, strings.Join(s.columns, ", "))
+
 	if s.keyCondition != nil && s.granuleEnd > 0 {
 		reader := storage.NewPartReader(s.part, &s.table.Schema)
 		idx, err := reader.LoadPrimaryIndex()
 		if err == nil {
 			s.granuleBegin, s.granuleEnd = s.keyCondition.CheckInPrimaryIndex(idx)
 		}
+	}
+
+	if s.granuleBegin >= s.granuleEnd {
+		log.Printf("[source] part %s: all %d granules pruned — skipping",
+			s.part.Info.DirName(), s.part.NumGranules)
+	} else {
+		selected := s.granuleEnd - s.granuleBegin
+		skipped := s.part.NumGranules - selected
+		log.Printf("[source] part %s: scanning granules [%d, %d) — %d selected, %d skipped",
+			s.part.Info.DirName(), s.granuleBegin, s.granuleEnd, selected, skipped)
 	}
 
 	s.currentGran = s.granuleBegin
