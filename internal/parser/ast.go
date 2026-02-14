@@ -138,6 +138,36 @@ type StarExpr struct{}
 
 func (*StarExpr) exprNode() {}
 
+// ExtractColumnRefs walks an Expression AST and returns deduplicated column names.
+func ExtractColumnRefs(expr Expression) []string {
+	seen := map[string]struct{}{}
+	var refs []string
+	var walk func(e Expression)
+	walk = func(e Expression) {
+		if e == nil {
+			return
+		}
+		switch n := e.(type) {
+		case *ColumnRef:
+			if _, ok := seen[n.Name]; !ok {
+				seen[n.Name] = struct{}{}
+				refs = append(refs, n.Name)
+			}
+		case *FunctionCall:
+			for _, arg := range n.Args {
+				walk(arg)
+			}
+		case *BinaryExpr:
+			walk(n.Left)
+			walk(n.Right)
+		case *UnaryExpr:
+			walk(n.Expr)
+		}
+	}
+	walk(expr)
+	return refs
+}
+
 // ExprToSQL converts an Expression AST back to its SQL text representation.
 func ExprToSQL(expr Expression) string {
 	if expr == nil {

@@ -572,6 +572,121 @@ func TestLowCardinalityMixedColumns(t *testing.T) {
 	}
 }
 
+func TestPartitionPruningByColumnRange(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create a table partitioned by a simple column (region).
+	execSQL(t, db, `CREATE TABLE prune_test (id UInt64, region String, value Int64) ENGINE = MergeTree() ORDER BY (id) PARTITION BY region`)
+
+	// Insert data that lands in 3 distinct partitions: us, eu, ap.
+	execSQL(t, db, `INSERT INTO prune_test VALUES (1, 'ap', 100), (2, 'eu', 200), (3, 'us', 300)`)
+	execSQL(t, db, `INSERT INTO prune_test VALUES (4, 'ap', 400), (5, 'eu', 500), (6, 'us', 600)`)
+
+	table, _ := db.GetTable("prune_test")
+	allParts := table.GetActiveParts()
+	if len(allParts) != 6 {
+		// Each insert of 3 rows into 3 different partitions creates 3 parts each → 6 parts total
+		t.Fatalf("expected 6 parts, got %d", len(allParts))
+	}
+
+	// Query filtering to a single partition value should still return correct results.
+	result := execSQL(t, db, `SELECT id, value FROM prune_test WHERE region = 'us' ORDER BY id`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 2 {
+		t.Fatalf("expected 2 rows for region='us', got %d", totalRows)
+	}
+}
+
+func TestPartitionPruningByDateTimeRange(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create a table partitioned by a DateTime column.
+	execSQL(t, db, `CREATE TABLE ts_prune (id UInt64, ts DateTime, value Int64) ENGINE = MergeTree() ORDER BY (id) PARTITION BY toYYYYMM(ts)`)
+
+	// Jan 2024: 1704067200 (2024-01-01), 1704153600 (2024-01-02)
+	// Feb 2024: 1706745600 (2024-02-01), 1706832000 (2024-02-02)
+	// Mar 2024: 1709251200 (2024-03-01)
+	execSQL(t, db, `INSERT INTO ts_prune VALUES (1, 1704067200, 10), (2, 1704153600, 20), (3, 1706745600, 30), (4, 1706832000, 40), (5, 1709251200, 50)`)
+
+	// Should have 3 partitions: 202401, 202402, 202403
+	table, _ := db.GetTable("ts_prune")
+	parts := table.GetActiveParts()
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 partitions, got %d", len(parts))
+	}
+
+	// Query with ts >= Feb 1 should only return Feb and Mar rows
+	result := execSQL(t, db, `SELECT id, value FROM ts_prune WHERE ts >= 1706745600 ORDER BY id`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 3 {
+		t.Fatalf("expected 3 rows for ts >= Feb 1, got %d", totalRows)
+	}
+
+	// Query with ts < Feb 1 should only return Jan rows
+	result = execSQL(t, db, `SELECT id, value FROM ts_prune WHERE ts < 1706745600 ORDER BY id`)
+	totalRows = 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 2 {
+		t.Fatalf("expected 2 rows for ts < Feb 1, got %d", totalRows)
+	}
+}
+
+func TestPartitionPruningNumericColumn(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Partition by a numeric column directly.
+	execSQL(t, db, `CREATE TABLE num_prune (id UInt64, bucket UInt32, value Int64) ENGINE = MergeTree() ORDER BY (id) PARTITION BY bucket`)
+
+	// Insert into 3 partitions: bucket 1, 2, 3 (separate inserts to get separate parts).
+	execSQL(t, db, `INSERT INTO num_prune VALUES (1, 1, 100), (2, 1, 200)`)
+	execSQL(t, db, `INSERT INTO num_prune VALUES (3, 2, 300), (4, 2, 400)`)
+	execSQL(t, db, `INSERT INTO num_prune VALUES (5, 3, 500), (6, 3, 600)`)
+
+	table, _ := db.GetTable("num_prune")
+	parts := table.GetActiveParts()
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 parts, got %d", len(parts))
+	}
+
+	// bucket > 2 should only return bucket 3
+	result := execSQL(t, db, `SELECT id, value FROM num_prune WHERE bucket > 2 ORDER BY id`)
+	totalRows := 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 2 {
+		t.Fatalf("expected 2 rows for bucket > 2, got %d", totalRows)
+	}
+
+	// bucket <= 1 should only return bucket 1
+	result = execSQL(t, db, `SELECT id, value FROM num_prune WHERE bucket <= 1 ORDER BY id`)
+	totalRows = 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 2 {
+		t.Fatalf("expected 2 rows for bucket <= 1, got %d", totalRows)
+	}
+
+	// bucket = 2 should return exactly bucket 2
+	result = execSQL(t, db, `SELECT id, value FROM num_prune WHERE bucket = 2 ORDER BY id`)
+	totalRows = 0
+	for _, block := range result.Blocks {
+		totalRows += block.NumRows()
+	}
+	if totalRows != 2 {
+		t.Fatalf("expected 2 rows for bucket = 2, got %d", totalRows)
+	}
+}
+
 func TestExprToSQLRoundTrip(t *testing.T) {
 	tests := []struct {
 		input string

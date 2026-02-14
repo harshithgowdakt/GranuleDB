@@ -6,6 +6,7 @@ import (
 
 	"github.com/harshithgowdakt/granuledb/internal/parser"
 	"github.com/harshithgowdakt/granuledb/internal/storage"
+	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // PlanSelect converts a SELECT AST into an operator tree.
@@ -22,11 +23,14 @@ func PlanSelect(stmt *parser.SelectStmt, db *storage.Database) (Operator, []stri
 	// Extract key ranges from WHERE for primary index pruning
 	keyRanges := ExtractKeyRanges(stmt.Where, table.Schema.OrderBy)
 
+	// Extract partition ranges from WHERE for minmax partition pruning
+	partitionRanges := ExtractPartitionRanges(stmt.Where, &table.Schema)
+
 	// Build operator chain bottom-up
 	var op Operator
 
 	// 1. Table scan
-	op = NewTableScanOperator(table, neededCols, keyRanges)
+	op = NewTableScanOperator(table, neededCols, keyRanges, partitionRanges)
 
 	// 2. Filter (WHERE)
 	if stmt.Where != nil {
@@ -200,5 +204,76 @@ func flipOp(op string) string {
 		return "<="
 	default:
 		return op
+	}
+}
+
+// ExtractPartitionRanges extracts comparison conditions from the WHERE clause
+// that reference columns used in the table's PARTITION BY expression. The
+// literal values are coerced to the column's native DataType so they can be
+// compared directly against minmax index values.
+func ExtractPartitionRanges(where parser.Expression, schema *storage.TableSchema) []PartitionRange {
+	if where == nil || schema.PartitionBy == "" {
+		return nil
+	}
+
+	partExpr, err := parser.ParseExpression(schema.PartitionBy)
+	if err != nil {
+		return nil
+	}
+	colNames := parser.ExtractColumnRefs(partExpr)
+	if len(colNames) == 0 {
+		return nil
+	}
+
+	partColSet := make(map[string]bool, len(colNames))
+	for _, c := range colNames {
+		partColSet[c] = true
+	}
+
+	var ranges []PartitionRange
+	extractPartitionFromExpr(where, partColSet, schema, &ranges)
+	return ranges
+}
+
+func extractPartitionFromExpr(expr parser.Expression, partColSet map[string]bool, schema *storage.TableSchema, ranges *[]PartitionRange) {
+	switch e := expr.(type) {
+	case *parser.BinaryExpr:
+		if strings.ToUpper(e.Op) == "AND" {
+			extractPartitionFromExpr(e.Left, partColSet, schema, ranges)
+			extractPartitionFromExpr(e.Right, partColSet, schema, ranges)
+			return
+		}
+
+		col, lit, flipped := extractColLiteral(e)
+		if col == "" || !partColSet[col] {
+			return
+		}
+
+		op := e.Op
+		if flipped {
+			op = flipOp(op)
+		}
+
+		switch op {
+		case "=", ">", ">=", "<", "<=":
+		default:
+			return
+		}
+
+		colDef, ok := schema.GetColumnDef(col)
+		if !ok {
+			return
+		}
+
+		coerced, ok := types.CoerceValue(colDef.DataType, lit)
+		if !ok {
+			return
+		}
+
+		*ranges = append(*ranges, PartitionRange{
+			Column: col,
+			Op:     op,
+			Value:  coerced,
+		})
 	}
 }

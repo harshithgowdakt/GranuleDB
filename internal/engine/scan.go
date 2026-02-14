@@ -13,22 +13,32 @@ type KeyRange struct {
 	MaxVal    types.Value // nil = unbounded
 }
 
+// PartitionRange specifies a comparison condition on a partition column for
+// minmax-index-based partition pruning.
+type PartitionRange struct {
+	Column string
+	Op     string      // "=", ">", ">=", "<", "<="
+	Value  types.Value // already coerced to column type
+}
+
 // TableScanOperator reads from all active parts of a table.
 type TableScanOperator struct {
-	table     *storage.MergeTreeTable
-	columns   []string
-	keyRanges []KeyRange
+	table           *storage.MergeTreeTable
+	columns         []string
+	keyRanges       []KeyRange
+	partitionRanges []PartitionRange
 
 	parts       []*storage.Part
 	currentPart int
 	done        bool
 }
 
-func NewTableScanOperator(table *storage.MergeTreeTable, columns []string, keyRanges []KeyRange) *TableScanOperator {
+func NewTableScanOperator(table *storage.MergeTreeTable, columns []string, keyRanges []KeyRange, partitionRanges []PartitionRange) *TableScanOperator {
 	return &TableScanOperator{
-		table:     table,
-		columns:   columns,
-		keyRanges: keyRanges,
+		table:           table,
+		columns:         columns,
+		keyRanges:       keyRanges,
+		partitionRanges: partitionRanges,
 	}
 }
 
@@ -45,6 +55,30 @@ func (s *TableScanOperator) Next() (*column.Block, error) {
 		s.currentPart++
 
 		reader := storage.NewPartReader(part, &s.table.Schema)
+
+		// Try partition pruning via minmax indexes
+		if len(s.partitionRanges) > 0 {
+			indexes, err := reader.LoadMinMaxIndexes()
+			if err == nil && len(indexes) > 0 {
+				skip := false
+				for _, pr := range s.partitionRanges {
+					for _, idx := range indexes {
+						if idx.ColumnName == pr.Column {
+							if idx.CanSkipByRange(pr.Op, pr.Value) {
+								skip = true
+								break
+							}
+						}
+					}
+					if skip {
+						break
+					}
+				}
+				if skip {
+					continue
+				}
+			}
+		}
 
 		// Try primary index pruning
 		granuleBegin := 0

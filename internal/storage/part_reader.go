@@ -9,6 +9,7 @@ import (
 
 	"github.com/harshithgowdakt/granuledb/internal/column"
 	"github.com/harshithgowdakt/granuledb/internal/compression"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
 	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
@@ -171,17 +172,30 @@ func (pr *PartReader) LoadPrimaryIndex() (*PrimaryIndex, error) {
 	return ReadPrimaryIndex(idxPath, pr.schema.OrderBy, keyTypes, numGranules)
 }
 
-// LoadMinMaxIndex loads the min-max index for the partition key column.
-func (pr *PartReader) LoadMinMaxIndex() (*MinMaxIndex, error) {
+// LoadMinMaxIndexes loads min-max indexes for all columns referenced in the partition expression.
+func (pr *PartReader) LoadMinMaxIndexes() ([]*MinMaxIndex, error) {
 	if pr.schema.PartitionBy == "" {
 		return nil, nil
 	}
-	colDef, ok := pr.schema.GetColumnDef(pr.schema.PartitionBy)
-	if !ok {
-		return nil, fmt.Errorf("partition column %s not in schema", pr.schema.PartitionBy)
+	partExpr, err := parser.ParseExpression(pr.schema.PartitionBy)
+	if err != nil {
+		return nil, fmt.Errorf("parsing partition expression: %w", err)
 	}
-	path := filepath.Join(pr.part.BasePath, "minmax_"+pr.schema.PartitionBy+".idx")
-	return ReadMinMaxIndex(path, pr.schema.PartitionBy, colDef.DataType)
+	colNames := parser.ExtractColumnRefs(partExpr)
+	var indexes []*MinMaxIndex
+	for _, colName := range colNames {
+		colDef, ok := pr.schema.GetColumnDef(colName)
+		if !ok {
+			continue
+		}
+		path := filepath.Join(pr.part.BasePath, "minmax_"+colName+".idx")
+		idx, err := ReadMinMaxIndex(path, colName, colDef.DataType)
+		if err != nil {
+			return nil, fmt.Errorf("loading minmax index for %s: %w", colName, err)
+		}
+		indexes = append(indexes, idx)
+	}
+	return indexes, nil
 }
 
 // readRowCount reads the row count from count.txt.

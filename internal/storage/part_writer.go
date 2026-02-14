@@ -10,6 +10,7 @@ import (
 
 	"github.com/harshithgowdakt/granuledb/internal/column"
 	"github.com/harshithgowdakt/granuledb/internal/compression"
+	"github.com/harshithgowdakt/granuledb/internal/parser"
 	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
@@ -70,11 +71,17 @@ func (pw *PartWriter) WritePart(block *column.Block, info PartInfo) (*Part, erro
 		return nil, fmt.Errorf("writing primary index: %w", err)
 	}
 
-	// Write min-max index for partition key column (only for simple column references).
+	// Write min-max index for columns referenced in the partition expression.
 	if pw.schema.PartitionBy != "" {
-		if _, isCol := pw.schema.GetColumnDef(pw.schema.PartitionBy); isCol {
-			if err := pw.writeMinMaxIndex(tmpDir, block); err != nil {
-				return nil, fmt.Errorf("writing minmax index: %w", err)
+		partExpr, err := parser.ParseExpression(pw.schema.PartitionBy)
+		if err != nil {
+			return nil, fmt.Errorf("parsing partition expression: %w", err)
+		}
+		for _, colName := range parser.ExtractColumnRefs(partExpr) {
+			if _, ok := pw.schema.GetColumnDef(colName); ok {
+				if err := pw.writeMinMaxIndex(tmpDir, block, colName); err != nil {
+					return nil, fmt.Errorf("writing minmax index for %s: %w", colName, err)
+				}
 			}
 		}
 	}
@@ -197,21 +204,21 @@ func (pw *PartWriter) writePrimaryIndex(dir string, block *column.Block, granule
 	return WritePrimaryIndex(filepath.Join(dir, "primary.idx"), idx)
 }
 
-// writeMinMaxIndex writes minmax_<col>.idx for the partition key column.
-func (pw *PartWriter) writeMinMaxIndex(dir string, block *column.Block) error {
-	col, ok := block.GetColumn(pw.schema.PartitionBy)
+// writeMinMaxIndex writes minmax_<col>.idx for the given column.
+func (pw *PartWriter) writeMinMaxIndex(dir string, block *column.Block, colName string) error {
+	col, ok := block.GetColumn(colName)
 	if !ok {
-		return fmt.Errorf("partition column %s not found", pw.schema.PartitionBy)
+		return fmt.Errorf("partition column %s not found", colName)
 	}
-	colDef, _ := pw.schema.GetColumnDef(pw.schema.PartitionBy)
+	colDef, _ := pw.schema.GetColumnDef(colName)
 	minVal, maxVal := ComputeMinMax(col)
 	idx := &MinMaxIndex{
-		ColumnName: pw.schema.PartitionBy,
+		ColumnName: colName,
 		DataType:   colDef.DataType,
 		Min:        minVal,
 		Max:        maxVal,
 	}
-	return WriteMinMaxIndex(filepath.Join(dir, "minmax_"+pw.schema.PartitionBy+".idx"), idx)
+	return WriteMinMaxIndex(filepath.Join(dir, "minmax_"+colName+".idx"), idx)
 }
 
 // writeColumnsFile writes columns.txt with column names and types.

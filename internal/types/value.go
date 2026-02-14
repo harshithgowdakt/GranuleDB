@@ -141,6 +141,115 @@ func cmpOrdered[T ordered](a, b T) int {
 	return 0
 }
 
+// CoerceValue converts a raw literal value (typically int64, float64, or string
+// from the parser) into the target DataType's native Go type. Returns (coerced, true)
+// on success or (nil, false) if the conversion is not possible.
+func CoerceValue(dt DataType, v Value) (Value, bool) {
+	switch dt {
+	case TypeUInt8:
+		switch x := v.(type) {
+		case uint8:
+			return x, true
+		case int64:
+			return uint8(x), true
+		case float64:
+			return uint8(x), true
+		}
+	case TypeUInt16:
+		switch x := v.(type) {
+		case uint16:
+			return x, true
+		case int64:
+			return uint16(x), true
+		case float64:
+			return uint16(x), true
+		}
+	case TypeUInt32:
+		switch x := v.(type) {
+		case uint32:
+			return x, true
+		case int64:
+			return uint32(x), true
+		case float64:
+			return uint32(x), true
+		}
+	case TypeUInt64:
+		switch x := v.(type) {
+		case uint64:
+			return x, true
+		case int64:
+			return uint64(x), true
+		case float64:
+			return uint64(x), true
+		}
+	case TypeInt8:
+		switch x := v.(type) {
+		case int8:
+			return x, true
+		case int64:
+			return int8(x), true
+		case float64:
+			return int8(x), true
+		}
+	case TypeInt16:
+		switch x := v.(type) {
+		case int16:
+			return x, true
+		case int64:
+			return int16(x), true
+		case float64:
+			return int16(x), true
+		}
+	case TypeInt32:
+		switch x := v.(type) {
+		case int32:
+			return x, true
+		case int64:
+			return int32(x), true
+		case float64:
+			return int32(x), true
+		}
+	case TypeInt64:
+		switch x := v.(type) {
+		case int64:
+			return x, true
+		case float64:
+			return int64(x), true
+		}
+	case TypeFloat32:
+		switch x := v.(type) {
+		case float32:
+			return x, true
+		case int64:
+			return float32(x), true
+		case float64:
+			return float32(x), true
+		}
+	case TypeFloat64:
+		switch x := v.(type) {
+		case float64:
+			return x, true
+		case int64:
+			return float64(x), true
+		}
+	case TypeString:
+		switch x := v.(type) {
+		case string:
+			return x, true
+		}
+	case TypeDateTime:
+		switch x := v.(type) {
+		case uint32:
+			return x, true
+		case int64:
+			return uint32(x), true
+		case float64:
+			return uint32(x), true
+		}
+	}
+	return nil, false
+}
+
 // ValueToString converts a value to its string representation.
 func ValueToString(dt DataType, v Value) string {
 	if v == nil {

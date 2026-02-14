@@ -13,7 +13,7 @@ fi
 
 # Create table once (ignore errors if it already exists).
 curl -sS -X POST "$HOST/" --data-binary \
-"CREATE TABLE $TABLE (event_time DateTime, workspace_id UInt64, workspace_name String, user_id UInt64, user_name String, state_key String, state_value String) ENGINE = MergeTree() ORDER BY (workspace_id, user_id, event_time)" >/dev/null || true
+"CREATE TABLE $TABLE (event_time DateTime, workspace_id UInt64, workspace_name String, user_id UInt64, user_name String, state_key String, state_value String) ENGINE = MergeTree() ORDER BY (workspace_id, user_id, event_time) PARTITION BY toYYYYMM(event_time)" >/dev/null || true
 
 while true; do
   ts=$(date +%s)
