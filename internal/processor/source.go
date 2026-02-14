@@ -1,7 +1,6 @@
 package processor
 
 import (
-	"github.com/harshithgowdakt/granuledb/internal/engine"
 	"github.com/harshithgowdakt/granuledb/internal/storage"
 )
 
@@ -11,10 +10,10 @@ import (
 type SourceProcessor struct {
 	BaseProcessor
 
-	table     *storage.MergeTreeTable
-	part      *storage.Part
-	columns   []string
-	keyRanges []engine.KeyRange
+	table        *storage.MergeTreeTable
+	part         *storage.Part
+	columns      []string
+	keyCondition *storage.KeyCondition
 
 	granuleBegin  int  // start of scan range (after index pruning)
 	granuleEnd    int  // end of scan range
@@ -32,14 +31,14 @@ func NewSourceProcessor(
 	table *storage.MergeTreeTable,
 	part *storage.Part,
 	columns []string,
-	keyRanges []engine.KeyRange,
+	keyCondition *storage.KeyCondition,
 ) *SourceProcessor {
 	return &SourceProcessor{
 		BaseProcessor: NewBaseProcessor("Source", 0, 1),
 		table:         table,
 		part:          part,
 		columns:       columns,
-		keyRanges:     keyRanges,
+		keyCondition:  keyCondition,
 		batchSize:     1, // one granule per Work() call
 	}
 }
@@ -127,19 +126,11 @@ func (s *SourceProcessor) resolveRange() {
 	s.granuleBegin = 0
 	s.granuleEnd = s.part.NumGranules
 
-	if len(s.keyRanges) > 0 && s.granuleEnd > 0 {
+	if s.keyCondition != nil && s.granuleEnd > 0 {
 		reader := storage.NewPartReader(s.part, &s.table.Schema)
 		idx, err := reader.LoadPrimaryIndex()
 		if err == nil {
-			for _, kr := range s.keyRanges {
-				gb, ge := idx.FindGranuleRange(kr.KeyColumn, kr.MinVal, kr.MaxVal)
-				if gb > s.granuleBegin {
-					s.granuleBegin = gb
-				}
-				if ge < s.granuleEnd {
-					s.granuleEnd = ge
-				}
-			}
+			s.granuleBegin, s.granuleEnd = s.keyCondition.CheckInPrimaryIndex(idx)
 		}
 	}
 

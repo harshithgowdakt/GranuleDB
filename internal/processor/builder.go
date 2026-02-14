@@ -35,42 +35,10 @@ func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResu
 	}
 
 	neededCols := engine.CollectNeededColumns(stmt, &table.Schema)
-	keyRanges := engine.ExtractKeyRanges(stmt.Where, table.Schema.OrderBy)
-	partitionRanges := engine.ExtractPartitionRanges(stmt.Where, &table.Schema)
+	keyCond := storage.NewKeyConditionForPrimaryKey(stmt.Where, &table.Schema)
 
-	parts := table.GetActiveParts()
-
-	// Partition pruning: filter out parts whose minmax indexes prove they
-	// cannot contain matching rows for the partition range conditions.
-	if len(partitionRanges) > 0 {
-		filtered := make([]*storage.Part, 0, len(parts))
-		for _, part := range parts {
-			reader := storage.NewPartReader(part, &table.Schema)
-			indexes, err := reader.LoadMinMaxIndexes()
-			if err != nil || len(indexes) == 0 {
-				filtered = append(filtered, part)
-				continue
-			}
-			skip := false
-			for _, pr := range partitionRanges {
-				for _, idx := range indexes {
-					if idx.ColumnName == pr.Column {
-						if idx.CanSkipByRange(pr.Op, pr.Value) {
-							skip = true
-							break
-						}
-					}
-				}
-				if skip {
-					break
-				}
-			}
-			if !skip {
-				filtered = append(filtered, part)
-			}
-		}
-		parts = filtered
-	}
+	// Centralized partition pruning via storage.FilterParts
+	parts, _ := storage.FilterParts(stmt.Where, &table.Schema, table.GetActiveParts())
 
 	var allProcs []Processor
 	var allEdges []Edge
@@ -133,7 +101,7 @@ func BuildPipeline(stmt *parser.SelectStmt, db *storage.Database) (*PipelineResu
 
 		for i, part := range parts {
 			// Source for this part.
-			sourceIdx := addProc(NewSourceProcessor(table, part, neededCols, keyRanges))
+			sourceIdx := addProc(NewSourceProcessor(table, part, neededCols, keyCond))
 			tailIdx := sourceIdx
 
 			// Per-part filter.

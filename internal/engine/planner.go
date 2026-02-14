@@ -2,11 +2,9 @@ package engine
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/harshithgowdakt/granuledb/internal/parser"
 	"github.com/harshithgowdakt/granuledb/internal/storage"
-	"github.com/harshithgowdakt/granuledb/internal/types"
 )
 
 // PlanSelect converts a SELECT AST into an operator tree.
@@ -20,17 +18,17 @@ func PlanSelect(stmt *parser.SelectStmt, db *storage.Database) (Operator, []stri
 	// Determine all columns needed from the table
 	neededCols := CollectNeededColumns(stmt, &table.Schema)
 
-	// Extract key ranges from WHERE for primary index pruning
-	keyRanges := ExtractKeyRanges(stmt.Where, table.Schema.OrderBy)
+	// Build KeyCondition for primary index pruning
+	keyCond := storage.NewKeyConditionForPrimaryKey(stmt.Where, &table.Schema)
 
-	// Extract partition ranges from WHERE for minmax partition pruning
-	partitionRanges := ExtractPartitionRanges(stmt.Where, &table.Schema)
+	// Centralized partition pruning via storage.FilterParts
+	parts, _ := storage.FilterParts(stmt.Where, &table.Schema, table.GetActiveParts())
 
 	// Build operator chain bottom-up
 	var op Operator
 
-	// 1. Table scan
-	op = NewTableScanOperator(table, neededCols, keyRanges, partitionRanges)
+	// 1. Table scan (receives pre-filtered parts)
+	op = NewTableScanOperator(table, neededCols, keyCond, parts)
 
 	// 2. Filter (WHERE)
 	if stmt.Where != nil {
@@ -128,152 +126,4 @@ func CollectNeededColumns(stmt *parser.SelectStmt, schema *storage.TableSchema) 
 		return schema.ColumnNames()
 	}
 	return result
-}
-
-// ExtractKeyRanges extracts simple primary key range conditions from WHERE.
-// Handles patterns like: key >= X, key > X, key <= X, key < X, key = X
-func ExtractKeyRanges(where parser.Expression, orderBy []string) []KeyRange {
-	if where == nil {
-		return nil
-	}
-
-	keySet := make(map[string]bool)
-	for _, k := range orderBy {
-		keySet[k] = true
-	}
-
-	var ranges []KeyRange
-	extractFromExpr(where, keySet, &ranges)
-	return ranges
-}
-
-func extractFromExpr(expr parser.Expression, keySet map[string]bool, ranges *[]KeyRange) {
-	switch e := expr.(type) {
-	case *parser.BinaryExpr:
-		if strings.ToUpper(e.Op) == "AND" {
-			extractFromExpr(e.Left, keySet, ranges)
-			extractFromExpr(e.Right, keySet, ranges)
-			return
-		}
-
-		// Check for column OP literal
-		col, lit, flipped := extractColLiteral(e)
-		if col == "" || !keySet[col] {
-			return
-		}
-
-		op := e.Op
-		if flipped {
-			op = flipOp(op)
-		}
-
-		switch op {
-		case "=":
-			*ranges = append(*ranges, KeyRange{KeyColumn: col, MinVal: lit, MaxVal: nil})
-		case ">", ">=":
-			*ranges = append(*ranges, KeyRange{KeyColumn: col, MinVal: lit, MaxVal: nil})
-		case "<", "<=":
-			*ranges = append(*ranges, KeyRange{KeyColumn: col, MinVal: nil, MaxVal: lit})
-		}
-	}
-}
-
-func extractColLiteral(e *parser.BinaryExpr) (colName string, litVal interface{}, flipped bool) {
-	if ref, ok := e.Left.(*parser.ColumnRef); ok {
-		if lit, ok := e.Right.(*parser.LiteralExpr); ok {
-			return ref.Name, lit.Value, false
-		}
-	}
-	if ref, ok := e.Right.(*parser.ColumnRef); ok {
-		if lit, ok := e.Left.(*parser.LiteralExpr); ok {
-			return ref.Name, lit.Value, true
-		}
-	}
-	return "", nil, false
-}
-
-func flipOp(op string) string {
-	switch op {
-	case "<":
-		return ">"
-	case ">":
-		return "<"
-	case "<=":
-		return ">="
-	case ">=":
-		return "<="
-	default:
-		return op
-	}
-}
-
-// ExtractPartitionRanges extracts comparison conditions from the WHERE clause
-// that reference columns used in the table's PARTITION BY expression. The
-// literal values are coerced to the column's native DataType so they can be
-// compared directly against minmax index values.
-func ExtractPartitionRanges(where parser.Expression, schema *storage.TableSchema) []PartitionRange {
-	if where == nil || schema.PartitionBy == "" {
-		return nil
-	}
-
-	partExpr, err := parser.ParseExpression(schema.PartitionBy)
-	if err != nil {
-		return nil
-	}
-	colNames := parser.ExtractColumnRefs(partExpr)
-	if len(colNames) == 0 {
-		return nil
-	}
-
-	partColSet := make(map[string]bool, len(colNames))
-	for _, c := range colNames {
-		partColSet[c] = true
-	}
-
-	var ranges []PartitionRange
-	extractPartitionFromExpr(where, partColSet, schema, &ranges)
-	return ranges
-}
-
-func extractPartitionFromExpr(expr parser.Expression, partColSet map[string]bool, schema *storage.TableSchema, ranges *[]PartitionRange) {
-	switch e := expr.(type) {
-	case *parser.BinaryExpr:
-		if strings.ToUpper(e.Op) == "AND" {
-			extractPartitionFromExpr(e.Left, partColSet, schema, ranges)
-			extractPartitionFromExpr(e.Right, partColSet, schema, ranges)
-			return
-		}
-
-		col, lit, flipped := extractColLiteral(e)
-		if col == "" || !partColSet[col] {
-			return
-		}
-
-		op := e.Op
-		if flipped {
-			op = flipOp(op)
-		}
-
-		switch op {
-		case "=", ">", ">=", "<", "<=":
-		default:
-			return
-		}
-
-		colDef, ok := schema.GetColumnDef(col)
-		if !ok {
-			return
-		}
-
-		coerced, ok := types.CoerceValue(colDef.DataType, lit)
-		if !ok {
-			return
-		}
-
-		*ranges = append(*ranges, PartitionRange{
-			Column: col,
-			Op:     op,
-			Value:  coerced,
-		})
-	}
 }

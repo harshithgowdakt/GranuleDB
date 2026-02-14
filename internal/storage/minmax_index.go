@@ -51,43 +51,6 @@ func ReadMinMaxIndex(path string, colName string, dt types.DataType) (*MinMaxInd
 	}, nil
 }
 
-// CanSkipByRange returns true if no rows in this part can match the given
-// comparison condition (op, val). The val must already be coerced to the
-// column's native DataType.
-func (idx *MinMaxIndex) CanSkipByRange(op string, val types.Value) bool {
-	cmp := types.CompareValues
-	dt := idx.DataType
-
-	switch op {
-	case "=":
-		// skip if val < min or val > max
-		if cmp(dt, val, idx.Min) < 0 || cmp(dt, val, idx.Max) > 0 {
-			return true
-		}
-	case ">":
-		// val > col => skip if max <= val
-		if cmp(dt, idx.Max, val) <= 0 {
-			return true
-		}
-	case ">=":
-		// val >= col => skip if max < val
-		if cmp(dt, idx.Max, val) < 0 {
-			return true
-		}
-	case "<":
-		// val < col => skip if min >= val
-		if cmp(dt, idx.Min, val) >= 0 {
-			return true
-		}
-	case "<=":
-		// val <= col => skip if min > val
-		if cmp(dt, idx.Min, val) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
 // ComputeMinMax computes min and max values from a column.
 func ComputeMinMax(col column.Column) (min, max types.Value) {
 	if col.Len() == 0 {
