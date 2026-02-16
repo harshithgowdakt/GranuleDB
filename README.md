@@ -31,7 +31,3 @@ go run ./cmd/granuledb
 ```
 
 By default, GranuleDB starts an HTTP server on `:8123`.
-
-## License
-
-Add your preferred license here.
